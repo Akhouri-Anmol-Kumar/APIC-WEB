@@ -1232,7 +1232,7 @@
 
       <div class="studio-body">
         <label class="drop" id="drop">
-          <input type="file" id="fileInput" accept="image/*">
+          <input type="file" id="fileInput" accept="image/*,.psd,image/vnd.adobe.photoshop">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg>
           <p><b>Drop an image here</b><br>or tap to browse — nothing leaves your device</p>
           <canvas id="canvas"></canvas>
@@ -1383,6 +1383,7 @@
               <option value="bmp">BMP — uncompressed bitmap</option>
               <option value="ico">ICO — app/favicon icon</option>
               <option value="pdf">PDF — single-page document</option>
+              <option value="psd">PSD — Photoshop, layers kept</option>
             </select>
           </div>
           <p class="hint" id="convertHint">PNG keeps every pixel exact — best after Remove Background.</p>
@@ -2077,6 +2078,7 @@
       if(typeof syncResizeFields === 'function') syncResizeFields();
       history = []; histIndex = -1; commitHistory();
       try{ window.__apicLooks && window.__apicLooks(im); }catch(e){}
+      try{ document.dispatchEvent(new CustomEvent('apic:loaded')); }catch(e){}
       pruneUrls();
     }
     img.onload = function(){
@@ -4242,6 +4244,10 @@
           var pngBuf = await (await canvasToBlob(sq,'image/png')).arrayBuffer();
           download(pngToICO(pngBuf, size), 'apic-export.ico');
         }
+        else if(fmt === 'psd'){
+          if(!window.__apicLayers || !window.__apicLayers.psdBlob) throw new Error('PSD export is not available right now.');
+          download(await window.__apicLayers.psdBlob(), 'apic-export.psd');
+        }
         else if(fmt === 'pdf'){
           var flat = flattenToWhite(canvas);
           var jpegBuf = await (await canvasToBlob(flat,'image/jpeg',0.92)).arrayBuffer();
@@ -5730,7 +5736,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   var sx = stage.getContext('2d');
   var L = [], sel = null, open = false, uid = 1, H = [{l:[], sel:null}], hi = 0, guide = {x:false, y:false};
   var busy = false, skipScale = false, dockSync = null;
-  var BLENDS = [['source-over','Normal'],['multiply','Multiply'],['screen','Screen'],['overlay','Overlay'],['soft-light','Soft light'],['hard-light','Hard light'],['darken','Darken'],['lighten','Lighten'],['color-dodge','Color dodge'],['color-burn','Color burn'],['difference','Difference'],['exclusion','Exclusion'],['hue','Hue'],['saturation','Saturation'],['color','Color'],['luminosity','Luminosity']];
+  var BLENDS = [['source-over','Normal'],['multiply','Multiply'],['screen','Screen'],['overlay','Overlay'],['soft-light','Soft light'],['hard-light','Hard light'],['darken','Darken'],['lighten','Lighten'],['color-dodge','Color dodge'],['color-burn','Color burn'],['difference','Difference'],['exclusion','Exclusion'],['hue','Hue'],['saturation','Saturation'],['color','Color'],['luminosity','Luminosity'],['lighter','Linear dodge (add)']];
   var coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
   var BMP_CAP = coarse ? 1800 : 3600;
   var HIT = coarse ? 24 : 14, HSZ = coarse ? 8 : 5;
@@ -5760,6 +5766,9 @@ COSTS AT SMALL SCALE: $0 across all of the above.
       '<div class="lyr-bar"><button class="quick-btn" id="lyFlipH">⇋ Flip H</button><button class="quick-btn" id="lyFlipV">⇵ Flip V</button><button class="quick-btn" id="lyRot">↻ Rotate 90°</button><button class="quick-btn" id="lyFit">Fit to canvas</button><button class="quick-btn" id="lyCenter">Centre</button><button class="quick-btn" id="lyReset">Reset layer</button><button class="quick-btn" id="lyUp">↑ Forward</button><button class="quick-btn" id="lyDown">↓ Backward</button><button class="quick-btn" id="lyDup">⧉ Duplicate</button><button class="quick-btn" id="lyMerge">Merge down</button><button class="quick-btn" id="lyDel">Delete</button></div>'+
     '</div>'+
     '<div class="lyr-bar"><button class="quick-btn" id="lyUndo">↺ Undo layer</button><button class="quick-btn" id="lyRedo">↻ Redo layer</button><button class="quick-btn" id="lyFlat" title="Merge every visible layer into the photo">▣ Flatten into photo</button></div>'+
+    '<div class="lyr-sub">Photoshop (.psd)</div>'+
+    '<div class="lyr-bar"><button class="quick-btn" id="lyPsdOpen" title="Open a Photoshop file with its layers">📂 Open PSD…</button><button class="quick-btn" id="lyPsdSave" title="Save the photo and every layer as a layered PSD">⬇ Save as PSD</button></div>'+
+    '<p class="hint" id="lyPsdMsg" role="status" aria-live="polite" style="margin-top:0;"></p>'+
     '<p class="hint" style="margin-bottom:0;">Drag to move · corner handle scales · top handle rotates (Shift = 15° steps) · two fingers pinch &amp; twist · Ctrl/Alt + scroll scales · double-click text to edit · arrows nudge · Del removes · Esc deselects · Ctrl+Z / Ctrl+Y undo layers · it snaps to the centre. Tip: crop your photo <b>before</b> adding layers.</p>';
   foot.parentNode.insertBefore(panel, foot);
   var $ = function(id){ return document.getElementById(id); };
@@ -6189,6 +6198,105 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   document.addEventListener('click', function(e){
     var t = e.target; if(t === exportBtn) bake();
   }, true);
+
+  /* ---------- Photoshop (.psd): open and save with layers (codec: <script id="apic-psd">; all on-device) ---------- */
+  var PSD_NOTE = 'Layers, masks, blend modes, opacity and visibility round-trip with Photoshop, Photopea and Affinity. Processed on this device; nothing is uploaded.';
+  var psdBusy = false, psdMsg = $('lyPsdMsg');
+  function say(t){ if(psdMsg) psdMsg.textContent = t || PSD_NOTE; }
+  function pause(){ return new Promise(function(r){ setTimeout(r, 25); }); }
+  function rasterize(l){
+    var pad = l.fx.bl > 0 ? Math.ceil(l.fx.bl*3) : 0, b = bbox(l);
+    var x0 = Math.floor(b.x0)-pad, y0 = Math.floor(b.y0)-pad, x1 = Math.ceil(b.x1)+pad, y1 = Math.ceil(b.y1)+pad;
+    if((x1-x0)*(y1-y0) > 90e6){ x0 = Math.max(x0, 0); y0 = Math.max(y0, 0); x1 = Math.min(x1, cv.width); y1 = Math.min(y1, cv.height); }
+    var w = Math.max(1, x1-x0), h = Math.max(1, y1-y0), c = mk(w, h), g = c.getContext('2d');
+    g.translate(-x0, -y0); drawLayer(g, Object.assign({}, l, {op:1}), true, 1);
+    return {left:x0, top:y0, width:w, height:h, rgba:g.getImageData(0, 0, w, h).data};
+  }
+  async function psdBlob(){
+    var P = window.APIC_PSD; if(!P) throw new Error('PSD support is not available.');
+    var W = cv.width, H = cv.height, base = mk(W, H), bg = base.getContext('2d');
+    if(baked) bg.putImageData(baked, 0, 0); else bg.drawImage(cv, 0, 0);            // the photo with its edits, without the layers
+    var layers = [{name:'Photo', left:0, top:0, width:W, height:H, rgba:bg.getImageData(0, 0, W, H).data, opacity:1, blend:'source-over', visible:true}];
+    for(var i=0; i<L.length; i++){
+      var l = L[i], r = rasterize(l); r.name = (l.type === 'text' && l.t) ? l.t.split('\n')[0].slice(0, 40) : l.name; r.opacity = l.op; r.blend = l.blend; r.visible = l.vis; layers.push(r);
+      if(i % 3 === 2) await pause();
+    }
+    var m = mk(W, H), mg = m.getContext('2d'); mg.fillStyle = '#fff'; mg.fillRect(0, 0, W, H); mg.drawImage(base, 0, 0); drawLayers(mg);
+    return new Blob(P.write({width:W, height:H, layers:layers, merged:mg.getImageData(0, 0, W, H).data}), {type:'image/vnd.adobe.photoshop'});
+  }
+  window.__apicLayers.psdBlob = psdBlob;
+  async function psdAuthed(){
+    if(typeof window.__apicBatchAuth !== 'function' || typeof window.__apicBatchSave !== 'function'){ say('✕ Downloads aren’t available right now. Reload the page and try again.'); return false; }
+    var st; try{ st = await window.__apicBatchAuth(); }catch(e){ st = 'network'; }
+    if(st === 'signedout'){
+      psdMsg.textContent = 'Sign in to download — your layers are kept, just press Save as PSD again afterwards. ';
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-gold btn-sm'; b.textContent = 'Sign in';
+      b.addEventListener('click', function(){ try{ window.__apicBatchSignIn(); }catch(e){} }); psdMsg.appendChild(b); return false;
+    }
+    if(st !== 'ok'){ say('✕ Could not verify sign-in right now (a blocker or your connection). Try again.'); return false; }
+    return true;
+  }
+  $('lyPsdSave').addEventListener('click', async function(){
+    if(psdBusy) return; psdBusy = true;
+    try{
+      if(!(await psdAuthed())) return;
+      say('Building PSD…'); await pause();
+      var b = await psdBlob(); window.__apicBatchSave(b, 'apic-layers.psd');
+      say('✓ Saved apic-layers.psd · ' + (L.length + 1) + ' layer' + (L.length ? 's' : '') + ' · ' + (b.size/1048576).toFixed(1) + ' MB. Open it in Photoshop, Photopea or Affinity.');
+    }catch(e){ say('✕ ' + (e && e.message || 'Could not build the PSD.')); }
+    finally{ psdBusy = false; }
+  });
+  function fromRGBA(w, h, data){ var c = mk(w, h); c.getContext('2d').putImageData(new ImageData(data, w, h), 0, 0); return c; }
+  function covers(ly, W, H){
+    if(!(ly.visible && ly.opacity > 0.99 && ly.blend === 'source-over' && ly.left <= 0 && ly.top <= 0 && ly.left + ly.width >= W && ly.top + ly.height >= H)) return false;
+    var a = ly.rgba; for(var i=3; i<a.length; i+=4) if(a[i] < 250) return false; return true;
+  }
+  function adopt(specs){
+    L = []; specs.forEach(function(sp){ var l = newLayer(sp.name, 'image', sp.canvas); l.x = sp.x; l.y = sp.y; l.s = sp.s; l.op = sp.op; l.blend = sp.blend; l.vis = sp.vis; L.push(l); });
+    sel = L.length ? L[L.length-1].id : null; H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh();
+  }
+  window.__apicLayers.adopt = adopt;
+  async function openPSD(file){
+    if(psdBusy) return; psdBusy = true; var fi = document.getElementById('fileInfo'), prev = fi ? fi.textContent : '';
+    function prog(t){ if(fi) fi.textContent = t; }
+    try{
+      if(!window.APIC_PSD) throw new Error('PSD support is not available.');
+      prog('Reading ' + file.name + '…'); await pause();
+      var res = await window.APIC_PSD.read(await file.arrayBuffer()), W = res.width, Ht = res.height, layers = res.layers.slice();
+      if(layers.length > 300) throw new Error('This PSD has ' + layers.length + ' layers; APIC opens up to 300.');
+      var baseCv = null, fromLayer = false, flatOnly = false;
+      if(layers.length && covers(layers[0], W, Ht)){ baseCv = mk(W, Ht); baseCv.getContext('2d').drawImage(fromRGBA(layers[0].width, layers[0].height, layers[0].rgba), layers[0].left, layers[0].top); layers.shift(); fromLayer = true; }
+      else if(!layers.length && res.merged){ baseCv = fromRGBA(W, Ht, res.merged); flatOnly = true; }
+      else baseCv = mk(W, Ht);
+      var blob = await new Promise(function(r){ baseCv.toBlob(r, 'image/png'); }); if(!blob) throw new Error('Could not prepare the image.');
+      var png = new File([blob], file.name.replace(/\.[^.]+$/, '') + '.png', {type:'image/png'});
+      prog('Opening ' + file.name + '…');
+      var loaded = new Promise(function(done){ var t = setTimeout(function(){ document.removeEventListener('apic:loaded', h); done(false); }, 25000); function h(){ clearTimeout(t); document.removeEventListener('apic:loaded', h); done(true); } document.addEventListener('apic:loaded', h); });
+      var inp = document.getElementById('fileInput'), dt = new DataTransfer(); dt.items.add(png); inp.files = dt.files; inp.dispatchEvent(new Event('change', {bubbles:true}));
+      if(!(await loaded)) throw new Error('The photo editor did not respond.');
+      var r = cv.width / W, specs = [];
+      for(var i=0; i<layers.length; i++){
+        var ly = layers[i], f = Math.min(1, BMP_CAP/Math.max(ly.width, ly.height)), c = fromRGBA(ly.width, ly.height, ly.rgba);
+        if(f < 1){ var c2 = mk(ly.width*f, ly.height*f), g2 = c2.getContext('2d'); g2.imageSmoothingQuality = 'high'; g2.drawImage(c, 0, 0, c2.width, c2.height); c = c2; }
+        specs.push({name:ly.name.slice(0, 60), canvas:c, x:(ly.left + ly.width/2)*r, y:(ly.top + ly.height/2)*r, s:ly.width*r/c.width, op:ly.opacity, blend:ly.blend, vis:ly.visible});
+        if(i % 4 === 3){ prog('Reading layers ' + (i+1) + '/' + layers.length + '…'); await pause(); }
+      }
+      adopt(specs); tab.click();
+      prog(file.name + ' \u00b7 ' + Math.round(file.size/1024) + ' KB \u00b7 ' + W + '\u00d7' + Ht + ' \u00b7 ' + (specs.length + (fromLayer ? 1 : 0)) + ' layer' + ((specs.length + (fromLayer ? 1 : 0)) === 1 ? '' : 's') + ' (PSD)');
+      var msg = flatOnly ? 'This file has no separate layers, so the flattened image was opened.' : 'Opened ' + file.name + ': ' + (fromLayer ? 'photo + ' : '') + specs.length + ' layer' + (specs.length === 1 ? '' : 's') + '.';
+      if(r < 0.999) msg += ' (Scaled to ' + Math.round(r*100) + '% to fit this device’s memory.)';
+      say(msg + (res.notes.length ? ' ' + res.notes.join(' ') : ''));
+    }catch(e){ if(fi) fi.textContent = prev; say('✕ ' + (e && e.message || 'Could not open this PSD.')); alert('Could not open this PSD.\n\n' + (e && e.message || '')); }
+    finally{ psdBusy = false; }
+  }
+  var psdIn = document.createElement('input'); psdIn.type = 'file'; psdIn.accept = '.psd,image/vnd.adobe.photoshop'; psdIn.style.display = 'none'; panel.appendChild(psdIn);
+  $('lyPsdOpen').addEventListener('click', function(){ psdIn.value = ''; psdIn.click(); });
+  psdIn.addEventListener('change', function(){ if(psdIn.files[0]) openPSD(psdIn.files[0]); });
+  function isPSD(f){ return !!f && (/\.psd$/i.test(f.name || '') || /photoshop/i.test(f.type || '')); }
+  /* a PSD chosen in the main picker or dropped on the photo area opens with its layers (capture phase: runs before the image-only handlers) */
+  document.addEventListener('change', function(e){ var t = e.target; if(t && t.id === 'fileInput' && t.files && isPSD(t.files[0])){ e.stopImmediatePropagation(); var f = t.files[0]; t.value = ''; openPSD(f); } }, true);
+  document.addEventListener('drop', function(e){ var dt = e.dataTransfer, f = dt && dt.files && dt.files[0]; if(isPSD(f) && e.target && e.target.closest && e.target.closest('#drop')){ e.preventDefault(); e.stopImmediatePropagation(); drop.classList.remove('drag'); openPSD(f); } }, true);
+  say();
 
   refresh();
 })();
@@ -10824,6 +10932,261 @@ var DSUI = (function () {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })(DSUI);
+
+</script>
+<script id="apic-psd">
+/* APIC PSD codec: Photoshop (.psd) reader + writer. Pure JS, no dependencies, no network. Runs entirely on this device.
+   Writer: 8-bit RGB, one raster layer per APIC layer (name, opacity, blend, visibility, position), RLE compressed, plus a merged preview.
+   Reader: 8/16-bit RGB, grayscale and CMYK; raw / RLE / ZIP channels; layer masks, groups (flattened to a name path), clipping masks,
+   blend modes, opacity, visibility. Unsupported parts (layer styles, adjustment layers, vector masks, live text) are reported, never faked. */
+(function (root) {
+  'use strict';
+  var TO_KEY = { 'source-over': 'norm', 'multiply': 'mul ', 'screen': 'scrn', 'overlay': 'over', 'soft-light': 'sLit', 'hard-light': 'hLit', 'darken': 'dark', 'lighten': 'lite', 'color-dodge': 'div ', 'color-burn': 'idiv', 'difference': 'diff', 'exclusion': 'smud', 'hue': 'hue ', 'saturation': 'sat ', 'color': 'colr', 'luminosity': 'lum ', 'lighter': 'lddg' };
+  var FROM_KEY = { 'norm': 'source-over', 'pass': 'source-over', 'diss': 'source-over', 'dark': 'darken', 'mul ': 'multiply', 'idiv': 'color-burn', 'lbrn': 'multiply', 'dkCl': 'darken', 'lite': 'lighten', 'scrn': 'screen', 'div ': 'color-dodge', 'lddg': 'lighter', 'lgCl': 'lighten', 'over': 'overlay', 'sLit': 'soft-light', 'hLit': 'hard-light', 'vLit': 'hard-light', 'lLit': 'hard-light', 'pLit': 'hard-light', 'hMix': 'hard-light', 'diff': 'difference', 'smud': 'exclusion', 'fsub': 'difference', 'fdiv': 'screen', 'hue ': 'hue', 'sat ': 'saturation', 'colr': 'color', 'lum ': 'luminosity' };
+  var APPROX = { 'diss': 'Dissolve', 'lbrn': 'Linear Burn', 'dkCl': 'Darker Color', 'lgCl': 'Lighter Color', 'vLit': 'Vivid Light', 'lLit': 'Linear Light', 'pLit': 'Pin Light', 'hMix': 'Hard Mix', 'fsub': 'Subtract', 'fdiv': 'Divide' };
+  var ADJ = { brit: 1, levl: 1, curv: 1, expA: 1, vibA: 1, hue2: 1, hue_: 1, blnc: 1, blwh: 1, phfl: 1, mixr: 1, clrL: 1, nvrt: 1, post: 1, thrs: 1, grdm: 1, selc: 1, SoCo: 1, GdFl: 1, PtFl: 1 };
+
+  /* ---------------------------------------------------------------- writer */
+  function packRow(src, n, out, o) {
+    var i = 0;
+    while (i < n) {
+      var run = 1; while (i + run < n && run < 128 && src[i + run] === src[i]) run++;
+      if (run > 1) { out[o++] = 257 - run; out[o++] = src[i]; i += run; }
+      else {
+        var s = i, lit = 1; i++;
+        while (i < n && lit < 128) { if (i + 1 < n && src[i] === src[i + 1]) break; lit++; i++; }
+        out[o++] = lit - 1; for (var k = 0; k < lit; k++) out[o++] = src[s + k];
+      }
+    }
+    return o;
+  }
+  /* one channel of an RGBA buffer, RLE: [u16 compression=1][h * u16 row sizes][rows] */
+  function rleChannel(rgba, w, h, ch) {
+    var rows = new Array(h), sizes = new Uint16Array(h), total = 0, tmp = new Uint8Array(w), out = new Uint8Array(w * 2 + 4);
+    for (var y = 0; y < h; y++) {
+      var b = y * w * 4 + ch; for (var x = 0; x < w; x++) tmp[x] = rgba[b + x * 4];
+      var e = packRow(tmp, w, out, 0); rows[y] = out.slice(0, e); sizes[y] = e; total += e;
+    }
+    var res = new Uint8Array(2 + h * 2 + total), dv = new DataView(res.buffer); dv.setUint16(0, 1); var p = 2;
+    for (y = 0; y < h; y++) { dv.setUint16(p, sizes[y]); p += 2; }
+    for (y = 0; y < h; y++) { res.set(rows[y], p); p += rows[y].length; }
+    return res;
+  }
+  function Buf() { this.a = []; this.n = 0; }
+  Buf.prototype.push = function (u8) { this.a.push(u8); this.n += u8.length; };
+  Buf.prototype.u8 = function (v) { this.push(new Uint8Array([v & 255])); };
+  Buf.prototype.u16 = function (v) { this.push(new Uint8Array([(v >> 8) & 255, v & 255])); };
+  Buf.prototype.u32 = function (v) { this.push(new Uint8Array([(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255])); };
+  Buf.prototype.i32 = function (v) { this.u32(v >>> 0); };
+  Buf.prototype.str = function (s) { var b = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) b[i] = s.charCodeAt(i) & 255; this.push(b); };
+  Buf.prototype.zeros = function (n) { if (n > 0) this.push(new Uint8Array(n)); };
+  function asciiName(s) { var o = ''; s = String(s || 'Layer'); for (var i = 0; i < s.length && o.length < 250; i++) { var c = s.charCodeAt(i); o += (c >= 32 && c < 127) ? s[i] : '?'; } return o || 'Layer'; }
+  function unicodeBlock(name) {
+    var s = String(name || 'Layer').slice(0, 250), b = new Buf(); b.u32(s.length); for (var i = 0; i < s.length; i++) b.u16(s.charCodeAt(i));
+    var len = b.n, pad = (4 - len % 4) % 4; b.zeros(pad); return { len: len + pad, parts: b.a };
+  }
+  /* spec: { width, height, layers: [{name, left, top, width, height, rgba, opacity 0..1, blend (canvas key), visible}], merged: RGBA (width*height*4) }
+     returns an array of Uint8Array parts (feed to new Blob(parts)) */
+  function write(spec) {
+    var W = spec.width | 0, H = spec.height | 0;
+    if (W < 1 || H < 1 || W > 30000 || H > 30000) throw new Error('PSD supports images up to 30000 px per side.');
+    var out = new Buf(); out.str('8BPS'); out.u16(1); out.zeros(6); out.u16(3); out.u32(H); out.u32(W); out.u16(8); out.u16(3);
+    out.u32(0); out.u32(0);
+    var recs = new Buf(), data = [], dataLen = 0, layers = spec.layers || [];
+    layers.forEach(function (l) {
+      var lw = Math.max(1, l.width | 0), lh = Math.max(1, l.height | 0), chans = [[0, 0], [1, 1], [2, 2], [-1, 3]], blobs = chans.map(function (c) { return rleChannel(l.rgba, lw, lh, c[1]); });
+      recs.i32(l.top | 0); recs.i32(l.left | 0); recs.i32((l.top | 0) + lh); recs.i32((l.left | 0) + lw); recs.u16(4);
+      chans.forEach(function (c, i) { recs.u16(c[0] & 0xFFFF); recs.u32(blobs[i].length); });
+      recs.str('8BIM'); recs.str(TO_KEY[l.blend] || 'norm'); recs.u8(Math.max(0, Math.min(255, Math.round((l.opacity == null ? 1 : l.opacity) * 255)))); recs.u8(0); recs.u8(l.visible === false ? 2 : 0); recs.u8(0);
+      var nm = asciiName(l.name), nb = new Buf(); nb.u8(nm.length); nb.str(nm); var padn = (4 - nb.n % 4) % 4; nb.zeros(padn);
+      var lu = unicodeBlock(l.name), extra = 4 + 4 + nb.n + 12 + lu.len;
+      recs.u32(extra); recs.u32(0); recs.u32(0); nb.a.forEach(function (p) { recs.push(p); });
+      recs.str('8BIM'); recs.str('luni'); recs.u32(lu.len); lu.parts.forEach(function (p) { recs.push(p); });
+      blobs.forEach(function (b) { data.push(b); dataLen += b.length; });
+    });
+    var infoLen = 2 + recs.n + dataLen, padInfo = infoLen % 2;
+    out.u32(4 + infoLen + padInfo + 4); out.u32(infoLen + padInfo); out.u16(layers.length);
+    recs.a.forEach(function (p) { out.push(p); }); data.forEach(function (p) { out.push(p); }); out.zeros(padInfo); out.u32(0);
+    /* merged image (RGB, RLE) so viewers that ignore layers still show the picture */
+    var m = spec.merged; if (!m) { m = new Uint8ClampedArray(W * H * 4); for (var i = 3; i < m.length; i += 4) m[i - 3] = m[i - 2] = m[i - 1] = m[i] = 255; }
+    var chs = [0, 1, 2].map(function (c) { return rleChannel(m, W, H, c); });
+    out.u16(1);
+    chs.forEach(function (b) { out.push(b.subarray(2, 2 + H * 2)); });
+    chs.forEach(function (b) { out.push(b.subarray(2 + H * 2)); });
+    return out.a;
+  }
+
+  /* ---------------------------------------------------------------- reader */
+  function R(buf) { this.u8 = new Uint8Array(buf); this.v = new DataView(buf); this.p = 0; }
+  R.prototype.u16 = function () { var x = this.v.getUint16(this.p); this.p += 2; return x; };
+  R.prototype.i16 = function () { var x = this.v.getInt16(this.p); this.p += 2; return x; };
+  R.prototype.u32 = function () { var x = this.v.getUint32(this.p); this.p += 4; return x; };
+  R.prototype.i32 = function () { var x = this.v.getInt32(this.p); this.p += 4; return x; };
+  R.prototype.b = function () { return this.u8[this.p++]; };
+  R.prototype.str = function (n) { var s = ''; for (var i = 0; i < n; i++) s += String.fromCharCode(this.u8[this.p++]); return s; };
+
+  async function inflate(u8) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('This browser cannot open ZIP-compressed PSD data.');
+    var ds = new DecompressionStream('deflate'), st = new Blob([u8]).stream().pipeThrough(ds);
+    return new Uint8Array(await new Response(st).arrayBuffer());
+  }
+  function unpackRow(src, p, end, dst, n) {
+    var o = 0; while (o < n && p < end) { var c = src[p++]; if (c > 128) { var r = 257 - c, v = src[p++]; while (r-- > 0 && o < n) dst[o++] = v; } else if (c < 128) { var l = c + 1; while (l-- > 0 && o < n) dst[o++] = src[p++]; } }
+  }
+  /* decode one channel plane to 8-bit. u8: file bytes; off/len: payload incl. the 2-byte compression field */
+  async function plane(u8, off, len, w, h, depth) {
+    var bpp = depth >> 3, comp = (u8[off] << 8) | u8[off + 1], p = off + 2, end = off + len, out = new Uint8Array(w * h), row = new Uint8Array(w * bpp), y, x;
+    if (w < 1 || h < 1) return out;
+    if (comp === 0) { for (y = 0; y < h; y++) for (x = 0; x < w; x++) out[y * w + x] = u8[p + (y * w + x) * bpp]; return out; }
+    if (comp === 1) {
+      var dv = new DataView(u8.buffer, u8.byteOffset), q = p + h * 2;
+      for (y = 0; y < h; y++) { var rl = dv.getUint16(p + y * 2); unpackRow(u8, q, Math.min(end, q + rl), row, w * bpp); q += rl; for (x = 0; x < w; x++) out[y * w + x] = row[x * bpp]; }
+      return out;
+    }
+    if (comp === 2 || comp === 3) {
+      var raw = await inflate(u8.subarray(p, end)), rb = w * bpp;
+      if (comp === 3) { for (y = 0; y < h; y++) { var b0 = y * rb; if (depth === 8) { for (x = 1; x < w; x++) raw[b0 + x] = (raw[b0 + x] + raw[b0 + x - 1]) & 255; } else { for (x = 1; x < w; x++) { var i2 = b0 + x * 2, pv = (raw[i2 - 2] << 8) | raw[i2 - 1], cv = ((raw[i2] << 8) | raw[i2 + 1]) + pv; raw[i2] = (cv >> 8) & 255; raw[i2 + 1] = cv & 255; } } } }
+      for (y = 0; y < h; y++) for (x = 0; x < w; x++) out[y * w + x] = raw[y * rb + x * bpp];
+      return out;
+    }
+    throw new Error('Unknown PSD compression (' + comp + ').');
+  }
+  function decodeLayerInfo(r, start, len, ctx) {
+    var save = r.p; r.p = start; var cnt = r.i16(), n = Math.abs(cnt), recs = [], i, j;
+    for (i = 0; i < n; i++) {
+      var L = { top: r.i32(), left: r.i32(), bottom: r.i32(), right: r.i32(), ch: [] }, nc = r.u16();
+      for (j = 0; j < nc; j++) L.ch.push({ id: r.i16(), len: r.u32() });
+      r.str(4); L.key = r.str(4); L.opacity = r.b(); L.clip = r.b(); L.flags = r.b(); r.b();
+      var exLen = r.u32(), exEnd = r.p + exLen; L.mask = null;
+      var ml = r.u32(); if (ml >= 18) { var mp = r.p; L.mask = { top: r.i32(), left: r.i32(), bottom: r.i32(), right: r.i32(), def: r.b(), flags: r.b() }; r.p = mp + ml; } else r.p += ml;
+      var bl = r.u32(); r.p += bl;
+      var nl = r.b(), nm = r.str(nl); r.p += (4 - (nl + 1) % 4) % 4; L.name = nm; L.uname = null; L.sect = -1; L.fx = false; L.text = false; L.vec = false; L.smart = false; L.adj = false;
+      while (r.p + 12 <= exEnd) {
+        var sg = r.str(4); if (sg !== '8BIM' && sg !== '8B64') break;
+        var key = r.str(4), bl2 = r.u32(), bs = r.p;
+        if (key === 'luni') { var cn = r.u32(), s = ''; for (j = 0; j < cn; j++) s += String.fromCharCode(r.u16()); L.uname = s; }
+        else if (key === 'lsct' || key === 'lsdk') { L.sect = r.u32(); }
+        else if (key === 'lfx2' || key === 'lrFX' || key === 'lfxs') L.fx = true;
+        else if (key === 'TySh' || key === 'tySh') L.text = true;
+        else if (key === 'vmsk' || key === 'vsms') L.vec = true;
+        else if (key === 'SoLd' || key === 'PlLd' || key === 'SoLE' || key === 'plLd') L.smart = true;
+        else if (ADJ[key]) L.adj = true;
+        r.p = bs + bl2;
+      }
+      r.p = exEnd; recs.push(L);
+    }
+    var pos = r.p;
+    for (i = 0; i < n; i++) for (j = 0; j < recs[i].ch.length; j++) { recs[i].ch[j].off = pos; pos += recs[i].ch[j].len; }
+    r.p = save; return recs;
+  }
+  /* -> { width, height, depth, mode, layers[bottom..top], notes[], mergedRGBA|null } */
+  async function read(buf, opts) {
+    opts = opts || {}; var r = new R(buf), notes = [];
+    if (r.u8.length < 40 || r.str(4) !== '8BPS') throw new Error('This is not a Photoshop (.psd) file.');
+    var ver = r.u16(); if (ver === 2) throw new Error('Large Document (.psb) files are not supported yet. Save as .psd.');
+    r.p += 6; var chan = r.u16(), H = r.u32(), W = r.u32(), depth = r.u16(), mode = r.u16();
+    if (depth !== 8 && depth !== 16) throw new Error('Only 8-bit and 16-bit PSD files are supported (this one is ' + depth + '-bit).');
+    if (mode !== 3 && mode !== 1 && mode !== 4) throw new Error('This PSD uses a colour mode APIC cannot read yet (RGB, grayscale and CMYK work).');
+    if (W * H > 150e6) throw new Error('This PSD is larger than 150 megapixels, too big for a browser tab.');
+    var cml = r.u32(); r.p += cml; var irl = r.u32(); r.p += irl;
+    var lmLen = r.u32(), lmStart = r.p, lmEnd = lmStart + lmLen, recs = [], negative = false;
+    if (lmLen > 0) {
+      var liLen = r.u32(), liStart = r.p;
+      if (liLen > 0) { negative = r.v.getInt16(liStart) < 0; recs = decodeLayerInfo(r, liStart, liLen); }
+      r.p = liStart + liLen; var gm = r.u32(); r.p += gm;
+      while (!recs.length && r.p + 12 <= lmEnd) {
+        var sg = r.str(4); if (sg !== '8BIM' && sg !== '8B64') break; var key = r.str(4), bl = r.u32(), bs = r.p;
+        if (key === 'Lr16' || key === 'Lr32') { negative = r.v.getInt16(bs) < 0; recs = decodeLayerInfo(r, bs, bl); }
+        r.p = bs + bl + (bl % 2);
+      }
+    }
+    var counts = { fx: 0, text: 0, vec: 0, adj: 0, smart: 0, approx: {} }, i, j, L, nm;
+    /* second pass, top-down knowledge: groups end markers come after children in file order; recompute membership with a proper stack */
+    var gs = [], items = [];
+    for (i = recs.length - 1; i >= 0; i--) {                                   // walk top → bottom: header opens, divider closes
+      L = recs[i]; nm = L.uname || L.name;
+      if (L.sect === 1 || L.sect === 2) { gs.push({ name: nm, vis: !(L.flags & 2), op: L.opacity / 255 }); continue; }
+      if (L.sect === 3) { gs.pop(); continue; }
+      items.push({ L: L, path: gs.slice() });
+    }
+    items.reverse();
+    var layers = [];
+    for (i = 0; i < items.length; i++) {
+      L = items[i].L; var path = items[i].path, lw = L.right - L.left, lh = L.bottom - L.top;
+      if (L.adj) counts.adj++; if (L.fx) counts.fx++; if (L.text) counts.text++; if (L.vec) counts.vec++; if (L.smart) counts.smart++;
+      if (APPROX[L.key]) counts.approx[APPROX[L.key]] = 1;
+      if (lw <= 0 || lh <= 0 || L.adj) continue;           // adjustment / empty layers carry no pixels
+      if (lw * lh > 120e6) throw new Error('A layer in this PSD is too large to open.');
+      var planes = {};
+      for (j = 0; j < L.ch.length; j++) {
+        var c = L.ch[j], pw = lw, ph = lh;
+        if (c.id === -2 || c.id === -3) { if (!L.mask || c.id === -3) continue; pw = L.mask.right - L.mask.left; ph = L.mask.bottom - L.mask.top; }
+        if (c.len < 2) continue; planes[c.id] = await plane(r.u8, c.off, c.len, pw, ph, depth);
+      }
+      var px = new Uint8ClampedArray(lw * lh * 4), n = lw * lh, k, A = planes[-1], P0 = planes[0], P1 = planes[1], P2 = planes[2], P3 = planes[3];
+      for (k = 0; k < n; k++) {
+        var o = k * 4, a = A ? A[k] : 255;
+        if (mode === 3) { px[o] = P0 ? P0[k] : 0; px[o + 1] = P1 ? P1[k] : 0; px[o + 2] = P2 ? P2[k] : 0; }
+        else if (mode === 1) { px[o] = px[o + 1] = px[o + 2] = P0 ? P0[k] : 0; }
+        else { var kk = P3 ? P3[k] : 255, cc = P0 ? P0[k] : 255, mm = P1 ? P1[k] : 255, yy = P2 ? P2[k] : 255; px[o] = cc * kk / 255; px[o + 1] = mm * kk / 255; px[o + 2] = yy * kk / 255; }
+        px[o + 3] = a;
+      }
+      if (L.mask && planes[-2] && !(L.mask.flags & 2)) {
+        var mk = L.mask, mw = mk.right - mk.left, mh = mk.bottom - mk.top, ox = (mk.flags & 1) ? L.left : 0, oy = (mk.flags & 1) ? L.top : 0, MP = planes[-2];
+        for (var yy2 = 0; yy2 < lh; yy2++) for (var xx = 0; xx < lw; xx++) {
+          var mx = L.left + xx - (mk.left + ox), my = L.top + yy2 - (mk.top + oy), mv = (mx >= 0 && my >= 0 && mx < mw && my < mh) ? MP[my * mw + mx] : mk.def, q = (yy2 * lw + xx) * 4 + 3;
+          px[q] = px[q] * mv / 255;
+        }
+      }
+      var vis = !(L.flags & 2), op = L.opacity / 255; path.forEach(function (g) { vis = vis && g.vis; op *= g.op; });
+      layers.push({ name: (path.length ? path.map(function (g) { return g.name; }).join(' / ') + ' / ' : '') + (L.uname || L.name || 'Layer'), left: L.left, top: L.top, width: lw, height: lh, rgba: px, opacity: op, blend: FROM_KEY[L.key] || 'source-over', visible: vis, clip: L.clip === 1, text: L.text, fx: L.fx });
+    }
+    /* clipping masks: multiply by the alpha of the layer they clip to */
+    var base = null;
+    for (i = 0; i < layers.length; i++) {
+      var ly = layers[i];
+      if (!ly.clip) { base = ly; continue; }
+      if (!base) continue; ly.visible = ly.visible && base.visible;
+      for (yy2 = 0; yy2 < ly.height; yy2++) for (xx = 0; xx < ly.width; xx++) {
+        var bx = ly.left + xx - base.left, by = ly.top + yy2 - base.top, ba = (bx >= 0 && by >= 0 && bx < base.width && by < base.height) ? base.rgba[(by * base.width + bx) * 4 + 3] : 0, qq = (yy2 * ly.width + xx) * 4 + 3;
+        ly.rgba[qq] = ly.rgba[qq] * ba / 255;
+      }
+      ly.clip = false;
+    }
+    if (counts.fx) notes.push(counts.fx + ' layer' + (counts.fx > 1 ? 's use' : ' uses') + ' layer styles (shadows, strokes, glows…), which are not rendered. Pixels are kept.');
+    if (counts.adj) notes.push(counts.adj + ' adjustment layer' + (counts.adj > 1 ? 's were' : ' was') + ' skipped (APIC cannot apply them yet).');
+    if (counts.vec) notes.push('Vector masks are ignored.');
+    if (counts.text) notes.push(counts.text + ' text layer' + (counts.text > 1 ? 's are' : ' is') + ' imported as pixels, not editable text.');
+    if (counts.smart) notes.push('Smart objects are imported as flattened pixels.');
+    var ap = Object.keys(counts.approx); if (ap.length) notes.push('Approximated blend modes: ' + ap.join(', ') + '.');
+    var merged = null;
+    if (opts.merged !== false) { try { merged = await readMerged(r, lmEnd, W, H, chan, depth, mode, negative); } catch (e) { merged = null; } }
+    return { width: W, height: H, depth: depth, mode: mode, layers: layers, notes: notes, merged: merged };
+  }
+  async function readMerged(r, pos, W, H, chan, depth, mode, negative) {
+    r.p = pos; var comp = r.u16(), bpp = depth >> 3, need = mode === 4 ? 4 : mode === 1 ? 1 : 3, planes = [], c, y, x;
+    if (chan < need) return null; var n = W * H, hasA = negative && chan > need;
+    var total = Math.min(chan, need + (hasA ? 1 : 0));
+    if (comp === 0) { for (c = 0; c < total; c++) { var pl = new Uint8Array(n); for (var i = 0; i < n; i++) pl[i] = r.u8[r.p + (c * n + i) * bpp]; planes.push(pl); } }
+    else if (comp === 1) {
+      var tbl = r.p, q = r.p + chan * H * 2, dv = r.v;
+      for (c = 0; c < chan; c++) { var pl2 = new Uint8Array(n), row = new Uint8Array(W * bpp); for (y = 0; y < H; y++) { var rl = dv.getUint16(tbl + (c * H + y) * 2); unpackRow(r.u8, q, q + rl, row, W * bpp); q += rl; for (x = 0; x < W; x++) pl2[y * W + x] = row[x * bpp]; } if (c < total) planes.push(pl2); }
+    } else if (comp === 2 || comp === 3) {
+      var raw = await inflate(r.u8.subarray(r.p)), rb = W * bpp;
+      for (c = 0; c < total; c++) { var pl3 = new Uint8Array(n); for (y = 0; y < H; y++) { var b0 = (c * H + y) * rb; if (comp === 3) { if (depth === 8) { for (x = 1; x < W; x++) raw[b0 + x] = (raw[b0 + x] + raw[b0 + x - 1]) & 255; } else { for (x = 1; x < W; x++) { var i2 = b0 + x * 2, pv = (raw[i2 - 2] << 8) | raw[i2 - 1], cv = ((raw[i2] << 8) | raw[i2 + 1]) + pv; raw[i2] = (cv >> 8) & 255; raw[i2 + 1] = cv & 255; } } } for (x = 0; x < W; x++) pl3[y * W + x] = raw[b0 + x * bpp]; } planes.push(pl3); }
+    } else return null;
+    var rgba = new Uint8ClampedArray(n * 4);
+    for (i = 0; i < n; i++) {
+      var o = i * 4;
+      if (mode === 3) { rgba[o] = planes[0][i]; rgba[o + 1] = planes[1][i]; rgba[o + 2] = planes[2][i]; }
+      else if (mode === 1) { rgba[o] = rgba[o + 1] = rgba[o + 2] = planes[0][i]; }
+      else { var kk = planes[3][i]; rgba[o] = planes[0][i] * kk / 255; rgba[o + 1] = planes[1][i] * kk / 255; rgba[o + 2] = planes[2][i] * kk / 255; }
+      rgba[o + 3] = hasA ? planes[need][i] : 255;
+    }
+    return rgba;
+  }
+  root.APIC_PSD = { write: write, read: read, TO_KEY: TO_KEY, FROM_KEY: FROM_KEY };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
 
 </script>
 <style id="apic-looks-css">

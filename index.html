@@ -9,6 +9,7 @@
 <meta name="robots" content="index, follow, max-image-preview:large" />
 <meta name="author" content="Akhouri Anmol Kumar, Akhouri Systems" />
 <meta name="theme-color" content="#07070a" />
+<meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'">
 <script>
 /* Apply saved/system theme before first paint (prevents flash) */
 (function(){
@@ -2061,6 +2062,7 @@
 
   function loadImage(file){
     if(!file.type.startsWith('image/')) return;
+    try{ window.__apicPrivacyScan && window.__apicPrivacyScan(file); }catch(e){}
     var img = new Image();
     function finish(im, resized){
       originalImg = im; rotation = 0; flipH = 1; flipV = 1; hasAlpha = false;
@@ -2074,6 +2076,7 @@
       updateGate();
       if(typeof syncResizeFields === 'function') syncResizeFields();
       history = []; histIndex = -1; commitHistory();
+      try{ window.__apicLooks && window.__apicLooks(im); }catch(e){}
       pruneUrls();
     }
     img.onload = function(){
@@ -9249,6 +9252,7 @@ body.ds-open{overflow:hidden}
 .ds-modalhead h2{margin:0;font-size:16px;flex:1}
 .ds-modalbody{overflow-y:auto;padding:14px;scrollbar-width:thin}
 .ds-sec input[type=search],.ds-sec input[type=text]{width:100%;box-sizing:border-box}
+.ds-keys{display:flex;flex-direction:column}.ds-keyrow{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}.ds-keyrow:last-child{border-bottom:0}.ds-keyrow kbd{font:12px/1.4 var(--mono,monospace);color:var(--text-muted);text-align:right;white-space:normal}
 .ds-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;margin:8px 0}
 .ds-photo{position:relative;aspect-ratio:1;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg);padding:0;cursor:pointer}
 .ds-photo:hover,.ds-photo:focus-visible{border-color:var(--green)}
@@ -10357,13 +10361,13 @@ var DSUI = (function () {
   /* ------------------------------------------------------------ open / close / tabs */
   function gotoTab(id) { if (id === 'export') { X.openExport && X.openExport(); return; } if (X.closeExport) X.closeExport(); S.tab = id; X.renderTabs && X.renderTabs(); }
   function open(opts) {
-    opts = opts || {}; if (!S.doc) { setDoc(blankDoc(), { reset: true }); }
+    opts = opts || {}; try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) { } if (!S.doc) { setDoc(blankDoc(), { reset: true }); }
     D.app.hidden = false; document.body.classList.add('ds-open'); S.open = true; previouslyFocused = document.activeElement; sizeStage(); fitView(); requestDraw();
     if (opts.tab) gotoTab(opts.tab); else X.renderTabs && X.renderTabs(); setTimeout(function () { D.stage.focus({ preventScroll: true }); }, 30);
     try { if (location.hash !== '#design') history.replaceState(null, '', '#design'); } catch (e) { }
   }
   var previouslyFocused = null;
-  function close() { S.open = false; D.app.hidden = true; document.body.classList.remove('ds-open'); try { if (location.hash === '#design') history.replaceState(null, '', location.pathname + location.search); } catch (e) { } try { previouslyFocused && previouslyFocused.focus && previouslyFocused.focus(); } catch (e) { } }
+  function close() { try { X.closeHelp && X.closeHelp(); } catch (e) { } S.open = false; D.app.hidden = true; document.body.classList.remove('ds-open'); try { if (location.hash === '#design') history.replaceState(null, '', location.pathname + location.search); } catch (e) { } try { previouslyFocused && previouslyFocused.focus && previouslyFocused.focus(); } catch (e) { } }
 
   function typing(t) { var n = t && t.tagName; return n === 'INPUT' || n === 'TEXTAREA' || n === 'SELECT' || (t && t.isContentEditable); }
   function onKey(ev) {
@@ -10371,6 +10375,7 @@ var DSUI = (function () {
     if (k === 'Escape') { if (X.closePopover && X.closePopover()) { ev.preventDefault(); return; } if (typing(t)) { t.blur(); return; } if (S.sel.length) setSel([]); else close(); ev.preventDefault(); return; }
     if (k === ' ' && !typing(t) && !ev.repeat) { spaceDown = true; D.stage.style.cursor = 'grab'; ev.preventDefault(); return; }
     if (typing(t)) { if (mod && (k === 'z' || k === 'y') && t.tagName !== 'TEXTAREA' && !(t.type === 'text')) { } return; }
+    if (k === '?') { ev.preventDefault(); X.openHelp && X.openHelp(); return; }
     if (mod && k.toLowerCase() === 'z') { ev.preventDefault(); ev.shiftKey ? redo() : undo(); return; }
     if (mod && k.toLowerCase() === 'y') { ev.preventDefault(); redo(); return; }
     if (mod && k.toLowerCase() === 'c') { ev.preventDefault(); copySel(); return; }
@@ -10399,7 +10404,7 @@ var DSUI = (function () {
         '<input type="text" id="dsName" class="ds-name" aria-label="Design name" maxlength="80" spellcheck="false">' +
         '<div class="ds-topact">' +
           '<button type="button" class="ds-ib" id="dsUndo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↺</button><button type="button" class="ds-ib" id="dsRedo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↻</button>' +
-                    '<button type="button" class="ds-ib ds-hide-sm" id="dsSave" title="Save project file (Ctrl+S)">Save</button><button type="button" class="ds-ib ds-hide-sm" id="dsOpenFile" title="Open project file">Open</button>' +
+                    '<button type="button" class="ds-ib ds-hide-sm" id="dsHelp" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button><button type="button" class="ds-ib ds-hide-sm" id="dsSave" title="Save project file (Ctrl+S)">Save</button><button type="button" class="ds-ib ds-hide-sm" id="dsOpenFile" title="Open project file">Open</button>' +
           '<button type="button" class="ds-exportbtn" id="dsExportTop" aria-haspopup="dialog">Export</button>' +
         '</div>' +
       '</div>' +
@@ -10411,7 +10416,7 @@ var DSUI = (function () {
     $('#dsClose', app).addEventListener('click', close); D.undo.addEventListener('click', undo); D.redo.addEventListener('click', redo);
     $('#dsZoomIn', app).addEventListener('click', function () { zoomAt(1.25); }); $('#dsZoomOut', app).addEventListener('click', function () { zoomAt(0.8); }); D.zoomVal.addEventListener('click', fitView);
     $('#dsSave', app).addEventListener('click', saveProject); $('#dsOpenFile', app).addEventListener('click', function () { pickFile('.json,application/json', openProjectFile); });
-    $('#dsExportTop', app).addEventListener('click', function () { X.openExport(); });
+    $('#dsExportTop', app).addEventListener('click', function () { X.openExport(); }); $('#dsHelp', app).addEventListener('click', function () { X.openHelp(); });
     function fitName() { D.name.style.width = Math.min(420, Math.max(120, D.name.value.length * 9 + 36)) + 'px'; } D.fitName = fitName; D.name.addEventListener('input', function () { fitName(); S.doc.name = C.safeName(D.name.value, 'Untitled design'); }); D.name.addEventListener('change', function () { commit('Rename', 'rename'); });
     var st = D.stage; st.addEventListener('pointerdown', onDown); st.addEventListener('pointermove', onMove); st.addEventListener('pointerup', onUp); st.addEventListener('pointercancel', onUp); st.addEventListener('dblclick', onDbl); st.addEventListener('wheel', onWheel, { passive: false });
     st.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -10499,7 +10504,7 @@ var DSUI = (function () {
   X.onSel = function () { if (S.tab === 'edit' || S.tab === 'layers') { var st = D.panel.scrollTop; renderPanel(); D.panel.scrollTop = st; } else if (S.sel.length && S.tab === 'add' && false) { } };
   X.onGeom = function (skipSelf) { syncers.forEach(function (f) { try { f(); } catch (e) { } }); };
   X.onFonts = function () { syncers.forEach(function (f) { try { f(); } catch (e) { } }); };
-  X.closePopover = function () { return closePop() || (X.closeExport ? X.closeExport() : false); };
+  X.closePopover = function () { return closePop() || (X.closeHelp && X.closeHelp()) || (X.closeExport ? X.closeExport() : false); };
 
   /* ------------------------------------------------------------ platform data (reused, not duplicated) */
   function sizes() { try { return typeof window.__apicPlatformSizes === 'function' ? window.__apicPlatformSizes() : []; } catch (e) { return []; } }
@@ -10796,6 +10801,20 @@ var DSUI = (function () {
     };
   })();
 
+  /* ------------------------------------------------------------ SHORTCUTS HELP */
+  (function () {
+    var bg = null, opener = null;
+    var KEYS = [['Undo / Redo', 'Ctrl+Z · Ctrl+Y (Shift+Ctrl+Z)'], ['Copy · Paste · Duplicate', 'Ctrl+C · Ctrl+V · Ctrl+D'], ['Select all', 'Ctrl+A'], ['Group / Ungroup', 'Ctrl+G · Shift+Ctrl+G'], ['Save project file', 'Ctrl+S'], ['Delete selected', 'Delete or Backspace'], ['Nudge selected', 'Arrow keys (Shift = 10×)'], ['Send backward / forward', '[ · ]  (Shift = to back / front)'], ['Zoom in / out / fit', '+ · − · 0'], ['Pan the canvas', 'Hold Space and drag'], ['Next element', 'Tab (with canvas focused)'], ['Edit selected text', 'Enter'], ['Deselect, then close', 'Esc'], ['This list', '?']];
+    X.closeHelp = function () { if (!bg) return false; bg.remove(); bg = null; if (opener && opener.focus) { try { opener.focus(); } catch (e) { } } return true; };
+    X.openHelp = function () {
+      if (bg) return; closePop(); opener = document.activeElement; bg = mk('div', 'ds-modalbg'); var m = mk('div', 'ds-modal'); m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-label', 'Keyboard shortcuts');
+      var head = mk('div', 'ds-modalhead'), x = mk('button', 'ds-ib', '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Close shortcuts'); x.addEventListener('click', X.closeHelp); head.appendChild(mk('h2', null, 'Keyboard shortcuts')); head.appendChild(x);
+      var body = mk('div', 'ds-modalbody'), tb = mk('div', 'ds-keys'); KEYS.forEach(function (r) { var row = mk('div', 'ds-keyrow'); row.appendChild(mk('span', null, r[0])); row.appendChild(mk('kbd', null, r[1])); tb.appendChild(row); }); body.appendChild(tb); body.appendChild(mk('p', 'ds-note', 'On touch screens: drag to move, pinch to zoom and rotate, tap an element to select it. Your design never leaves this device.'));
+      m.appendChild(head); m.appendChild(body); bg.appendChild(m); D.app.appendChild(bg);
+      bg.addEventListener('pointerdown', function (e) { if (e.target === bg) X.closeHelp(); }); bg.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); X.closeHelp(); } }); x.focus();
+    };
+  })();
+
   /* ------------------------------------------------------------ boot */
   function boot() {
     var mf = document.getElementById('apic-design-fonts-manifest'), manifest = null; var base = 'fonts/';
@@ -10806,6 +10825,177 @@ var DSUI = (function () {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })(DSUI);
 
+</script>
+<style id="apic-looks-css">
+#apicLooks{margin:0 0 10px}
+#apicLooks .lk-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px}
+#apicLooks .lk-head b{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);font-weight:600}
+#apicLooks .lk-strip{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x proximity;scrollbar-width:thin;scrollbar-color:var(--line) transparent;-webkit-overflow-scrolling:touch}
+#apicLooks .lk{flex:none;width:68px;background:none;border:0;padding:0;cursor:pointer;scroll-snap-align:start;color:var(--text);font:inherit;text-align:center}
+#apicLooks .lk canvas{display:block;width:68px;height:52px;border-radius:8px;border:2px solid var(--line);background:var(--bg-3);transition:border-color .15s,transform .15s}
+#apicLooks .lk:hover canvas{border-color:var(--text-muted)}
+#apicLooks .lk[aria-pressed=true] canvas{border-color:var(--green);box-shadow:0 0 0 2px color-mix(in srgb,var(--green) 30%,transparent)}
+#apicLooks .lk span{display:block;margin-top:3px;font-size:10.5px;line-height:1.2;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#apicLooks .lk[aria-pressed=true] span{color:var(--text)}
+#apicLooks .lk:focus-visible canvas{outline:2px solid var(--green);outline-offset:2px}
+#apicLooks .lk-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#apicLooks .lk-actions .btn{min-height:36px}
+#apicLooks .lk-msg{font-size:12px;color:var(--text-muted);min-height:16px;margin-top:6px}
+@media (prefers-reduced-motion:reduce){#apicLooks .lk canvas{transition:none}}
+</style>
+<script id="apic-looks">
+/* Looks strip (live thumbnails of YOUR photo), one-click Auto enhance and hold-to-compare for the Edit tab.
+   It only drives the existing Edit controls (filter select + sliders), so history, undo, export and gating are untouched.
+   Everything runs locally on a small downscaled copy of the photo; nothing leaves the device. */
+(function () {
+  'use strict';
+  var root = null, strip = null, msg = null, src = null, thumbs = [];
+  function $(id) { return document.getElementById(id); }
+  function fire(el, t) { el.dispatchEvent(new Event(t, { bubbles: true })); }
+  function looks() {
+    var out = [{ name: 'Original', main: 'none', more: null }], a = $('editFilter'), b = $('editFilterMore'); if (!a || !b) return out;
+    Array.prototype.forEach.call(a.options, function (o) { if (o.value !== 'none' && o.value !== '__more__') out.push({ name: o.textContent, main: o.value, more: null, css: o.value }); });
+    Array.prototype.forEach.call(b.options, function (o) { out.push({ name: o.textContent, main: '__more__', more: o.value, css: o.value }); });
+    return out;
+  }
+  function active() { var a = $('editFilter').value, b = $('editFilterMore').value; return { main: a, more: a === '__more__' ? b : null }; }
+  function mark() { var c = active(); thumbs.forEach(function (t) { var on = t.look.main === c.main && (t.look.main !== '__more__' || t.look.more === c.more); t.btn.setAttribute('aria-pressed', String(on)); }); }
+  function apply(l) {
+    var a = $('editFilter'), b = $('editFilterMore'); a.value = l.main; if (l.more) b.value = l.more;
+    fire(a, 'input'); if (l.more) fire(b, 'input'); fire(a, 'change');
+    mark();
+  }
+  function paint(im) {
+    if (!strip) return; strip.textContent = ''; thumbs = [];
+    var W = 136, H = 104, base = document.createElement('canvas'); base.width = W; base.height = H;
+    var iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height; if (!iw || !ih) return;
+    var sc = Math.max(W / iw, H / ih), dw = iw * sc, dh = ih * sc, g = base.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(im, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    looks().forEach(function (l) {
+      var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'lk'; btn.title = l.name; btn.setAttribute('aria-label', 'Look: ' + l.name); btn.setAttribute('aria-pressed', 'false');
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.getContext('2d').drawImage(base, 0, 0); if (l.css) cv.style.filter = l.css;   // CSS filter: works in every browser, no per-pixel code
+      var lab = document.createElement('span'); lab.textContent = l.name; btn.appendChild(cv); btn.appendChild(lab);
+      btn.addEventListener('click', function () { apply(l); }); strip.appendChild(btn); thumbs.push({ btn: btn, look: l });
+    });
+    mark();
+  }
+  function enhance() {
+    if (!src) { setMsg('Open a photo first.'); return; }
+    var W = 192, sc = Math.min(1, W / Math.max(src.naturalWidth || src.width, src.naturalHeight || src.height)), w = Math.max(1, Math.round((src.naturalWidth || src.width) * sc)), h = Math.max(1, Math.round((src.naturalHeight || src.height) * sc));
+    var cv = document.createElement('canvas'); cv.width = w; cv.height = h; var g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(src, 0, 0, w, h);
+    var d; try { d = g.getImageData(0, 0, w, h).data; } catch (e) { setMsg('Could not analyse this photo.'); return; }
+    var hist = new Uint32Array(256), n = 0, sum = 0, sat = 0;
+    for (var i = 0; i < d.length; i += 4) { if (d[i + 3] < 8) continue; var r = d[i], gg = d[i + 1], b = d[i + 2], y = Math.round(0.2126 * r + 0.7152 * gg + 0.0722 * b); hist[y]++; n++; sum += y; var mx = Math.max(r, gg, b), mn = Math.min(r, gg, b); sat += mx ? (mx - mn) / mx : 0; }
+    if (!n) { setMsg('Nothing to analyse.'); return; }
+    function pct(p) { var t = n * p, c = 0; for (var k = 0; k < 256; k++) { c += hist[k]; if (c >= t) return k; } return 255; }
+    var lo = pct(0.01), hi = pct(0.99), range = Math.max(40, hi - lo), mean = sum / n, avgSat = sat / n;
+    var gain = Math.min(1.35, Math.max(1, 232 / range));                       // stretch a flat histogram, never over-crush
+    var mid = (mean - 128) * gain + 128, bri = Math.min(1.22, Math.max(0.86, 120 / Math.max(40, mid)));  // aim for a natural mid-tone
+    var satBoost = avgSat < 0.22 ? 1.12 : avgSat < 0.38 ? 1.06 : 1.0;
+    var C = Math.round(gain * 100), B = Math.round(bri * 100), S = Math.round(satBoost * 100);
+    var cb = $('editContrast'), bb = $('editBright'), sb = $('editSaturate'); bb.value = B; cb.value = C; sb.value = S;
+    fire(bb, 'input'); fire(cb, 'input'); fire(sb, 'input'); fire(bb, 'change');
+    setMsg((C === 100 && B === 100 && S === 100) ? 'Already well balanced. No change needed.' : 'Auto enhance: brightness ' + B + '%, contrast ' + C + '%, saturation ' + S + '%. Fine-tune with the sliders below, or Reset all.');
+  }
+  function setMsg(t) { if (msg) msg.textContent = t; }
+  function build() {
+    var panel = $('panel-edit'); if (!panel || root) return; var anchor = panel.querySelector('.quick-grid'); if (!anchor) return;
+    root = document.createElement('div'); root.id = 'apicLooks';
+    root.innerHTML = '<div class="lk-head"><b>Looks</b></div><div class="lk-strip" role="group" aria-label="Looks, previewed on your photo"></div><div class="lk-actions"><button type="button" class="btn btn-ghost btn-sm" id="lkAuto" title="Analyse the histogram and set brightness, contrast and saturation">✨ Auto enhance</button><button type="button" class="btn btn-ghost btn-sm" id="lkBefore" title="Hold to see the original">Hold: before</button></div><div class="lk-msg" id="lkMsg" role="status" aria-live="polite"></div>';
+    anchor.parentNode.insertBefore(root, anchor.nextSibling);
+    strip = root.querySelector('.lk-strip'); msg = $('lkMsg');
+    $('lkAuto').addEventListener('click', enhance);
+    var cmp = $('advCompare'), bt = $('lkBefore');
+    if (cmp && bt) {
+      bt.addEventListener('pointerdown', function (e) { e.preventDefault(); cmp.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true })); });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (t) { bt.addEventListener(t, function () { cmp.dispatchEvent(new Event('pointerup', { bubbles: true })); }); });
+      bt.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      bt.addEventListener('keydown', function (e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); cmp.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true })); } });
+      bt.addEventListener('keyup', function (e) { if (e.key === ' ' || e.key === 'Enter') cmp.dispatchEvent(new Event('pointerup', { bubbles: true })); });
+    }
+    ['editFilter', 'editFilterMore'].forEach(function (id) { $(id).addEventListener('input', mark); });
+    var rs = $('resetEdit'); rs && rs.addEventListener('click', function () { setTimeout(mark, 0); setMsg(''); });
+    root.hidden = true;
+  }
+  window.__apicLooks = function (im) { build(); if (!root) return; src = im; root.hidden = false; setMsg(''); paint(im); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build); else build();
+})();
+</script>
+<style id="apic-privacy-css">
+#apicPrivNote{display:flex;gap:8px;align-items:flex-start;margin:8px 0 0;padding:8px 10px;border:1px solid var(--line);border-left:3px solid var(--green);border-radius:8px;background:var(--bg-2);color:var(--text);font-size:12.5px;line-height:1.45}
+#apicPrivNote[hidden]{display:none}
+#apicPrivNote span{flex:1;min-width:0}
+#apicPrivNote button{flex:none;background:none;border:0;color:var(--text-muted);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;min-width:28px;min-height:28px}
+#apicPrivNote button:hover{color:var(--text)}
+</style>
+<script id="apic-privacy">
+/* Photo privacy scan + unsaved-edits guard. 100% local: reads only the first bytes of the file you chose, sends nothing anywhere. */
+(function () {
+  'use strict';
+  function u16(v, o, le) { return v.getUint16(o, le); }
+  function u32(v, o, le) { return v.getUint32(o, le); }
+  /* Minimal JPEG/EXIF reader: only answers "does it carry location / camera / time info?" */
+  function scanExif(buf) {
+    var v = new DataView(buf), n = v.byteLength, r = { gps: false, device: false, time: false };
+    if (n < 12 || u16(v, 0, false) !== 0xFFD8) return null;
+    var o = 2;
+    while (o + 4 < n) {
+      if (v.getUint8(o) !== 0xFF) break; var mk = v.getUint8(o + 1); if (mk === 0xDA || mk === 0xD9) break;
+      var len = u16(v, o + 2, false);
+      if (mk === 0xE1 && o + 10 < n && u32(v, o + 4, false) === 0x45786966) {            // "Exif"
+        var t = o + 10; if (t + 8 > n) break; var le = u16(v, t, false) === 0x4949;
+        var ifd0 = t + u32(v, t + 4, le);
+        function readIfd(off, cb) { if (off + 2 > n) return; var c = u16(v, off, le); for (var i = 0; i < c && off + 2 + i * 12 + 12 <= n; i++) { var e = off + 2 + i * 12; cb(u16(v, e, le), u32(v, e + 8, le), e); } }
+        var exifPtr = 0;
+        readIfd(ifd0, function (tag, val) {
+          if (tag === 0x8825) { var g = t + val; if (g + 2 <= n && u16(v, g, le) > 0) r.gps = true; }
+          else if (tag === 0x010F || tag === 0x0110) r.device = true;
+          else if (tag === 0x8769) exifPtr = t + val;
+          else if (tag === 0x0132) r.time = true;
+        });
+        if (exifPtr) readIfd(exifPtr, function (tag) { if (tag === 0x9003 || tag === 0x9004) r.time = true; });
+        return r;
+      }
+      o += 2 + len;
+    }
+    return r;
+  }
+  var note = null, textEl = null;
+  function ensureNote() {
+    if (note) return;
+    var host = document.getElementById('fileInfo'); if (!host || !host.parentNode) return;
+    note = document.createElement('div'); note.id = 'apicPrivNote'; note.hidden = true; note.setAttribute('role', 'status');
+    textEl = document.createElement('span'); var x = document.createElement('button'); x.type = 'button'; x.setAttribute('aria-label', 'Dismiss'); x.textContent = '×'; x.addEventListener('click', function () { note.hidden = true; });
+    note.appendChild(textEl); note.appendChild(x); host.parentNode.insertBefore(note, host.nextSibling);
+  }
+  window.__apicPrivacyScan = function (file) {
+    ensureNote(); if (note) note.hidden = true;
+    if (!file || !/^image\/jpe?g$/i.test(file.type)) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      var r; try { r = scanExif(rd.result); } catch (e) { r = null; } if (!r || !(r.gps || r.device || r.time) || !note) return;
+      var what = []; if (r.gps) what.push('GPS location'); if (r.device) what.push('camera / phone model'); if (r.time) what.push('date and time');
+      textEl.textContent = '🔒 This photo contains hidden ' + what.join(', ').replace(/, ([^,]*)$/, ' and $1') + '. APIC re-encodes images in your browser, so this information is not carried into your edited or exported file. Nothing was uploaded.';
+      note.hidden = false;
+    };
+    try { rd.readAsArrayBuffer(file.slice(0, 262144)); } catch (e) { }
+  };
+
+  /* Unsaved edits guard for the main editor: warn only if there is something to lose. */
+  var dirty = false, undo = null;
+  function init() {
+    undo = document.getElementById('undoBtn'); var studio = document.getElementById('studio'); if (!undo || !studio) return;
+    function touch(e) { if (e.target && e.target.closest && e.target.closest('#undoBtn,#redoBtn')) return; dirty = true; }
+    studio.addEventListener('input', touch, true); studio.addEventListener('change', touch, true); studio.addEventListener('pointerup', touch, true);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  /* any real file download (signed-in export) means the work is saved */
+  try { var ac = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.hasAttribute && this.hasAttribute('download')) dirty = false; return ac.apply(this, arguments); }; } catch (e) { }
+  window.addEventListener('beforeunload', function (e) {
+    if (!dirty || !undo || undo.disabled) return;                       // nothing edited yet, or already downloaded
+    var ds = document.getElementById('dsApp'); if (ds && !ds.hidden) return;   // Design Studio has its own guard + autosave
+    e.preventDefault(); e.returnValue = '';
+  });
+})();
 </script>
 <style id="apic-i18n-css">
 #apicLangBtn{position:fixed;right:76px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:150;display:flex;gap:6px;align-items:center;min-height:44px;padding:0 14px;border-radius:30px;background:var(--bg-2);color:var(--text);border:1px solid var(--line);cursor:pointer;font:600 13px/1 system-ui,sans-serif;box-shadow:var(--shadow,0 4px 16px #0004)}

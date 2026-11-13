@@ -65,6 +65,8 @@
     "Smart image compression to a target file size",
     "On-device AI background removal",
     "Precise pixel or percentage image resizing",
+    "Eleven tools in one place: Edit, Advanced, Remove Object, Resize, Convert, Compress, Remove BG, AI Tools, Layers, Social and Visual Intelligence",
+    "Private by design: images are processed on your device and never uploaded",
     "Social media presets: exact-size profile pictures, banners, covers, posts and stories for Instagram, YouTube, Facebook, X, TikTok, LinkedIn and more, with safe-zone guides and ZIP export"
   ]
 }
@@ -350,6 +352,7 @@
 <script>
   // Turns low-level model/network errors into plain-language messages (returns null for unrelated errors).
   window.__apicModelErrMsg = function(e){
+    if(e && e.apicCancelled) return 'Download cancelled.';
     var m = String((e && e.message) || e || '');
     if((typeof navigator !== 'undefined' && navigator.onLine === false) || /offline/i.test(m)) return "You're offline. Connect once so the AI model can download — it's cached for next time.";
     if(/stalled/i.test(m)) return 'The AI model download stalled — your connection looks slow or dropped.';
@@ -360,6 +363,51 @@
     return null;
   };
 
+  // Small self-contained dialog + progress toast for big model downloads (uses the site's theme variables).
+  window.__apicModelUI = (function(){
+    var css = document.createElement('style');
+    css.textContent =
+      '#apicModelAsk{position:fixed; inset:0; z-index:9999; background:rgba(3,4,6,0.72); display:none; align-items:center; justify-content:center; padding:20px; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);}' +
+      '#apicModelAsk.show{display:flex;}' +
+      '#apicModelAsk .mk{width:100%; max-width:380px; background:var(--bg-2,#14141c); border:1px solid var(--line,rgba(150,255,210,0.14)); border-radius:var(--card-radius,14px); box-shadow:var(--shadow-lift,0 26px 60px -24px rgba(0,0,0,0.65)); padding:26px; color:var(--text,#eef1f6); font-family:var(--sans,"Inter",sans-serif); text-align:center;}' +
+      '#apicModelAsk h3{font-family:var(--display,"Space Grotesk",sans-serif); font-size:19px; margin:0 0 10px; font-weight:700;}' +
+      '#apicModelAsk p{font-size:13.5px; line-height:1.55; color:var(--text-muted,#8b8fa3); margin:0 0 20px;}' +
+      '#apicModelAsk button{display:block; width:100%; padding:12px 16px; margin-bottom:10px; border-radius:8px; border:1px solid var(--line,rgba(150,255,210,0.14)); background:transparent; color:var(--text,#eef1f6); font:600 14px var(--sans,"Inter",sans-serif); cursor:pointer;}' +
+      '#apicModelAsk button:last-child{margin-bottom:0;}' +
+      '#apicModelAsk .go{background:var(--green,#39ff9d); color:#04140c; border-color:transparent;}' +
+      '#apicModelBar{position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:9998; display:none; align-items:center; gap:12px; padding:10px 14px; border-radius:10px; background:var(--bg-2,#14141c); border:1px solid var(--line,rgba(150,255,210,0.14)); color:var(--text,#eef1f6); font:600 13px var(--sans,"Inter",sans-serif); box-shadow:var(--shadow-lift,0 26px 60px -24px rgba(0,0,0,0.65)); max-width:calc(100vw - 24px);}' +
+      '#apicModelBar.show{display:flex;}' +
+      '#apicModelBar button{padding:6px 12px; border-radius:7px; border:1px solid var(--line,rgba(150,255,210,0.3)); background:transparent; color:var(--text,#eef1f6); font:600 12.5px var(--sans,"Inter",sans-serif); cursor:pointer;}';
+    document.head.appendChild(css);
+    var ask = null, bar = null, onCancel = null, pend = null;
+    function build(){
+      if(ask) return;
+      ask = document.createElement('div'); ask.id = 'apicModelAsk';
+      ask.innerHTML = '<div class="mk" role="dialog" aria-modal="true"><h3>Download AI model?</h3><p id="apicMkTxt"></p><button type="button" class="go" id="apicMkGo">Download</button><button type="button" id="apicMkNo">Cancel</button></div>';
+      document.body.appendChild(ask);
+      bar = document.createElement('div'); bar.id = 'apicModelBar';
+      bar.innerHTML = '<span id="apicMbTxt"></span><button type="button" id="apicMbCancel">Cancel download</button>';
+      document.body.appendChild(bar);
+      function done(v){ ask.classList.remove('show'); if(pend){ var r = pend; pend = null; r(v); } }
+      document.getElementById('apicMkGo').addEventListener('click', function(){ done(true); });
+      document.getElementById('apicMkNo').addEventListener('click', function(){ done(false); });
+      ask.addEventListener('click', function(e){ if(e.target === ask) done(false); });
+      document.getElementById('apicMbCancel').addEventListener('click', function(){ if(onCancel) onCancel(); });
+    }
+    return {
+      approved: {},
+      ask: function(mb){
+        build();
+        document.getElementById('apicMkTxt').textContent = 'This tool needs a one-time download of about ' + mb + '. It is saved on your device, so you will not download it again, and your photo is never uploaded.';
+        ask.classList.add('show');
+        return new Promise(function(r){ pend = r; });
+      },
+      show: function(mb, cb){ build(); onCancel = cb; document.getElementById('apicMbTxt').textContent = 'Downloading AI model (' + mb + ')… 0%'; bar.classList.add('show'); },
+      update: function(pc){ var t = document.getElementById('apicMbTxt'); if(t) t.textContent = t.textContent.replace(/….*$/, '… ' + pc + '%'); },
+      hide: function(){ if(bar) bar.classList.remove('show'); onCancel = null; }
+    };
+  })();
+
   window.__apicFetchModel = async function(url, estBytes, onProgress){
     var CACHE = 'apic-models-v1';
     try{
@@ -369,11 +417,27 @@
       }
     }catch(e){ /* cache unavailable: just download */ }
 
+    // Large first-time downloads: say the size, ask first, and allow cancelling mid-way.
+    var st = { cancelled: false, ctl: null };
+    function cancelErr(){ var ce = new Error('Download cancelled'); ce.apicCancelled = true; return ce; }
+    var userProg = onProgress, mbTxt = Math.max(1, Math.round(estBytes/1e6)) + ' MB';
+    var ui = window.__apicModelUI;
+    if(estBytes >= 8e6){
+      if(!ui.approved[url]){
+        var go = await ui.ask(mbTxt);
+        if(!go) throw cancelErr();
+        ui.approved[url] = 1;
+      }
+      ui.show(mbTxt, function(){ st.cancelled = true; try{ if(st.ctl) st.ctl.abort(); }catch(e){} });
+      onProgress = function(pc){ ui.update(pc); if(userProg) userProg(pc); };
+    }
+
     // Stall-based timeout: aborts only if NO bytes arrive for 40s. A big model on a slow
     // phone connection is allowed to take as long as it needs; a dead link is not.
     function download(u){
       return new Promise(function(resolve, reject){
-        var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null, timer;
+        var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null, timer; st.ctl = ctl;
+        if(st.cancelled){ reject(cancelErr()); return; }
         function arm(){ clearTimeout(timer); timer = setTimeout(function(){ if(ctl) ctl.abort(); reject(new Error('model download stalled')); }, 40000); }
         arm();
         fetch(u, { signal: ctl ? ctl.signal : undefined }).then(async function(res){
@@ -404,12 +468,12 @@
       var fatalCount = 0;
       for(var ci = 0; ci < cands.length && !out; ci++){
         try{ out = await download(cands[ci]); }
-        catch(e){ lastErr = e; if(e && e.apicFatal) fatalCount++; }
+        catch(e){ lastErr = e; if(e && e.apicFatal) fatalCount++; if(st.cancelled){ ui.hide(); throw cancelErr(); } }
       }
       if(out || fatalCount === cands.length) break;
       if(attempt < 2) await new Promise(function(r){ setTimeout(r, 1500 * (attempt + 1)); });
     }
-    if(!out) throw (lastErr || new Error('model download failed'));
+    if(!out){ ui.hide(); throw (lastErr || new Error('model download failed')); }
     try{
       if(window.caches){
         var c1 = await caches.open(CACHE);
@@ -417,6 +481,7 @@
       }
     }catch(e){ /* quota / private mode: skip caching */ }
     if(onProgress) onProgress(100);
+    ui.hide();
     return out;
   };
 
@@ -537,6 +602,17 @@
   }
   nav.top-links a::after{content:""; position:absolute; left:0; right:100%; bottom:-3px; height:1px; background:var(--grad-brand); transition:right .25s var(--ease-out);}
   nav.top-links a:hover{color:var(--text);}
+  #bxBox{border-color:color-mix(in srgb, var(--green) 50%, var(--line)); box-shadow:0 10px 34px -16px color-mix(in srgb, var(--green) 55%, transparent);}
+  #bxBox > summary{font-weight:700; color:var(--text);}
+  #recentSec{max-width:900px; margin:30px auto 0; display:none;}
+  #recentSec.show{display:block;}
+  #recentSec .rc-head{display:flex; align-items:center; justify-content:space-between; font-family:var(--mono); font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--text-muted); margin-bottom:10px;}
+  #recentSec .rc-head button{background:transparent; border:1px solid var(--line); color:var(--text-muted); border-radius:6px; padding:3px 9px; font:600 10.5px var(--mono); cursor:pointer;}
+  #recentSec .rc-list{display:flex; gap:10px; overflow-x:auto; padding-bottom:4px;}
+  #recentSec .rc-item{flex:0 0 auto; width:104px; background:var(--bg-2); border:1px solid var(--line); border-radius:10px; padding:6px; cursor:pointer; color:var(--text); text-align:left;}
+  #recentSec .rc-item:hover{border-color:var(--green);}
+  #recentSec .rc-item img{width:100%; height:72px; object-fit:cover; border-radius:6px; display:block; background:var(--bg-3);}
+  #recentSec .rc-item span{display:block; margin-top:5px; font:600 10.5px var(--mono); color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   nav.top-links a:hover::after{right:0;}
 
   .top-actions{display:flex; align-items:center; gap:10px;}
@@ -658,6 +734,11 @@
     background-size: 18px 18px;
   }
   .drop canvas{max-width:100%; max-height:340px; display:none; border-radius:3px; position:relative; z-index:1;}
+  #zoomBar{position:absolute; right:8px; bottom:8px; z-index:4; display:none; gap:4px; align-items:center;}
+  #zoomBar.show{display:flex;}
+  #zoomBar button{min-width:30px; height:30px; padding:0 8px; border-radius:6px; border:1px solid var(--line); background:var(--bg-2); color:var(--text); cursor:pointer; font:600 13px var(--mono);}
+  #zoomBar button.on{border-color:var(--green); color:var(--green);}
+  #zoomBar span{font:600 11px var(--mono); color:var(--text); background:var(--bg-2); border:1px solid var(--line); border-radius:6px; padding:8px 4px; min-width:42px; text-align:center;}
   #overlay{position:absolute; z-index:2; pointer-events:none; display:none; max-width:100%; max-height:340px; border-radius:3px;}
 
   /* ===== Image loaded: frameless, tight, full-screen workspace =====
@@ -844,6 +925,16 @@
   .frame-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:0; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;}
   .frame{padding:30px 22px; border-right:1px solid var(--line); transition:background .25s var(--ease-out), transform .25s var(--ease-out), box-shadow .25s var(--ease-out); position:relative; z-index:1;}
   .frame:last-child{border-right:none;}
+  .pitch-row{list-style:none; margin:0 0 26px; padding:0; display:grid; grid-template-columns:repeat(4,1fr); gap:14px;}
+  .pitch-row li{font-size:13px; line-height:1.5; color:var(--text-muted); padding-left:14px; border-left:2px solid var(--green);}
+  .pitch-row li b{display:block; color:var(--text); font-family:var(--display); font-size:14.5px; margin-bottom:2px;}
+  @media (max-width:900px){ .pitch-row{grid-template-columns:1fr 1fr;} }
+  @media (max-width:520px){ .pitch-row{grid-template-columns:1fr;} }
+  .frame-grid.f11{grid-template-columns:repeat(4,1fr);}
+  .frame-grid.f11 .frame{border-bottom:1px solid var(--line);}
+  .frame-grid.f11 .frame:nth-child(4n){border-right:none;}
+  .frame-grid.f11 .frame:nth-child(n+9){border-bottom:none;}
+  .frame-grid.f11 .frame:last-child{grid-column:span 2; border-right:none;}
   .frame::before{content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--grad-brand); transform:scaleX(0); transform-origin:left; transition:transform .3s var(--ease-out);}
   .frame:hover{background:var(--bg-2); transform:translateY(-3px); box-shadow:var(--shadow-lift); z-index:2;}
   .frame:hover::before{transform:scaleX(1);}
@@ -921,25 +1012,28 @@
   #storageNotice a{color:var(--cyan); cursor:pointer;}
 
   @media (max-width:900px){
-    .frame-grid{grid-template-columns:1fr 1fr;}
+    .frame-grid,.frame-grid.f11{grid-template-columns:1fr 1fr;}
+    .frame-grid.f11 .frame:nth-child(n){border-right:1px solid var(--line); border-bottom:1px solid var(--line);}
+    .frame-grid.f11 .frame:nth-child(2n){border-right:none;}
+    .frame-grid.f11 .frame:nth-last-child(-n+1){border-bottom:none;}
     .frame{border-bottom:1px solid var(--line);}
     nav.top-links{display:none;}
     .bench-tools{grid-template-columns:repeat(2,1fr);}
     .studio.maximized{inset:6px;}
   }
-  /* ---------- boot screen ---------- */
+  /* ---------- opening animation (under 1 second) ---------- */
   #bootScreen{
     position:fixed; inset:0; z-index:500; background:#050507;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
-    gap:22px; transition:opacity .45s ease, visibility .45s ease;
+    gap:18px; transition:opacity .24s ease, visibility .24s ease;
   }
   #bootScreen.fade-out{opacity:0; visibility:hidden; pointer-events:none;}
-  #bootScreen img{width:56px; height:56px; border-radius:14px; box-shadow:0 0 40px rgba(57,255,157,0.25);}
-  .boot-bar-track{width:220px; height:3px; border-radius:2px; background:rgba(255,255,255,0.08); overflow:hidden;}
-  .boot-bar-fill{height:100%; width:0%; background:linear-gradient(90deg, var(--green), var(--cyan)); animation: bootfill 1.9s ease forwards;}
+  #bootScreen img{width:56px; height:56px; border-radius:14px; box-shadow:0 0 40px rgba(57,255,157,0.25); animation:bootpop .5s cubic-bezier(.2,.9,.25,1.2) both;}
+  @keyframes bootpop{ from{opacity:0; transform:scale(.6);} to{opacity:1; transform:scale(1);} }
+  .boot-bar-track{width:160px; height:3px; border-radius:2px; background:rgba(255,255,255,0.08); overflow:hidden;}
+  .boot-bar-fill{height:100%; width:0%; background:linear-gradient(90deg, var(--green), var(--cyan)); animation: bootfill .55s cubic-bezier(.3,.7,.2,1) .05s forwards;}
   @keyframes bootfill{ to{ width:100%; } }
-  .boot-log{font-family:var(--mono); font-size:11px; color:#5c6270; letter-spacing:0.5px; height:16px; text-align:center;}
-  .boot-log b{color:var(--green);}
+  @media (prefers-reduced-motion:reduce){ #bootScreen img,.boot-bar-fill{animation-duration:.01s;} }
 
   /* ---------- phones: drop the "window" box, use the full width ----------
      Side gutters stay (22px above 600px, so tablets keep their margins);
@@ -1153,7 +1247,6 @@
 <div id="bootScreen">
   <img id="apicLogoSrc" src="data:image/png;base64,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" alt="APIC">
   <div class="boot-bar-track"><div class="boot-bar-fill"></div></div>
-  <div class="boot-log" id="bootLog">initializing<b>_</b></div>
 </div>
 
 <header class="top">
@@ -1164,6 +1257,7 @@
     </a>
     <nav class="top-links">
       <a href="#features">Features</a>
+      <a href="#batch" id="navBatch">Batch</a>
       <a href="#counter">Community</a>
       <a href="#download">Desktop App</a>
     </nav>
@@ -1201,7 +1295,7 @@
 
       <div class="studio-body">
         <label class="drop" id="drop">
-          <input type="file" id="fileInput" accept="image/*,.psd,image/vnd.adobe.photoshop">
+          <input type="file" id="fileInput" accept="image/*,.psd,image/vnd.adobe.photoshop,.heic,.heif,image/heic,image/heif">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg>
           <p><b>Drop an image here</b><br>or tap to browse — nothing leaves your device</p>
           <canvas id="canvas"></canvas>
@@ -1257,6 +1351,16 @@
           <div class="row"><label>Contrast</label><input type="range" id="editContrast" min="40" max="180" value="100"><span class="val" id="editContrastVal">100%</span></div>
           <div class="row"><label>Saturation</label><input type="range" id="editSaturate" min="0" max="220" value="100"><span class="val" id="editSaturateVal">100%</span></div>
           <div class="row"><label>Blur</label><input type="range" id="editBlur" min="0" max="12" value="0" step="0.5"><span class="val" id="editBlurVal">0px</span></div>
+          <div class="row"><label>Straighten</label><input type="range" id="editStraighten" min="-15" max="15" value="0" step="0.5"><span class="val" id="editStraightenVal">0°</span></div>
+          <div class="row"><label>Crop</label>
+            <select id="cropRatio"><option value="-1">Choose a shape…</option><option value="0">Free</option><option value="1">1:1 square</option><option value="0.8">4:5 portrait</option><option value="0.75">3:4</option><option value="1.3333">4:3</option><option value="1.7778">16:9 wide</option><option value="0.5625">9:16 story</option></select>
+            <button class="btn btn-ghost btn-sm" id="selToggle">Select area</button></div>
+          <div class="row"><button class="btn btn-ghost btn-sm" id="cropApplyE" style="flex:1;">Apply crop</button><button class="btn btn-ghost btn-sm" id="cropClearE" style="flex:1;">Clear selection</button></div>
+          <div class="row"><label>Hide area</label>
+            <select id="regionMode"><option value="blur">Blur</option><option value="pixelate">Pixelate</option></select>
+            <input type="range" id="regionAmt" min="1" max="100" value="60">
+            <button class="btn btn-ghost btn-sm" id="regionApply">Apply</button></div>
+          <p class="hint" style="margin-top:6px;">Crop and Hide area both use the selection: tap Select area (or pick a crop shape), then drag on the photo. Hide area blurs or pixelates faces, plates or text.</p>
           <button class="btn btn-ghost btn-sm" id="resetEdit">Reset all</button>
         </div>
 
@@ -1316,8 +1420,8 @@
           <div class="row"><label>Quality</label>
             <select id="orQuality">
               <option value="fast">Fast (MI-GAN)</option>
-              <option value="best">Best (MI-GAN, full detail)</option>
-              <option value="ultra" selected>Ultra (LaMa — highest accuracy, desktop)</option>
+              <option value="best" selected>Best (MI-GAN, full detail)</option>
+              <option value="ultra">Ultra (LaMa — highest accuracy, desktop)</option>
             </select>
           </div>
           <div class="row"><button class="btn btn-ghost btn-sm" id="orClear" style="flex:1;">Clear mask</button></div>
@@ -1366,8 +1470,17 @@
               <option value="target">Target file size</option>
             </select>
           </div>
+          <div class="row"><label>Format</label>
+            <select id="compressFormat">
+              <option value="jpeg">JPEG — small, no transparency</option>
+              <option value="webp">WebP — smaller, keeps transparency</option>
+              <option value="avif" id="optAvif" hidden>AVIF — smallest, modern browsers</option>
+            </select>
+          </div>
           <div class="row" id="rowQuality"><label>Quality</label><input type="range" id="compressQ" min="10" max="98" value="82"><span class="val" id="compressQVal">82%</span></div>
           <div class="row" id="rowTarget" style="display:none;"><label>Target KB</label><input type="number" id="targetKB" min="5" value="200"><span class="filesize">auto-finds the highest quality that fits; if impossible, it shrinks the image and tells you the real size</span></div>
+          <div class="row"><label>Result</label><span class="filesize" id="compressLive" style="flex:1;">—</span></div>
+          <div class="row"><button class="btn btn-ghost btn-sm" id="compressHold" style="flex:1;">Hold to see compressed look</button></div>
           <p class="hint">Compress runs a smart search across quality levels so you keep the most detail for the smallest file — not just a flat quality cut.</p>
         </div>
 
@@ -1383,6 +1496,17 @@
           </div>
           <button class="btn btn-gold btn-sm" id="runBgRemove">Remove background</button>
           <span class="filesize" id="bgStatus" style="margin-left:10px;"></span>
+          <div id="bgTouch" style="display:none; margin-top:14px;">
+            <p class="hint" style="margin-top:0;">Touch up: paint on the photo to bring parts back or erase them (pinch or use the zoom buttons for precision). Then pick a new background in one click.</p>
+            <div class="row"><label>Brush</label>
+              <select id="bgBrushMode"><option value="restore">Restore (bring back)</option><option value="erase">Erase</option></select>
+              <input type="range" id="bgBrushSize" min="4" max="120" value="28"><span class="val" id="bgBrushSizeVal">28</span></div>
+            <div class="row" style="flex-wrap:wrap; gap:6px;"><label>Background</label>
+              <button class="btn btn-ghost btn-sm" data-bgfill="white">White</button>
+              <button class="btn btn-ghost btn-sm" data-bgfill="black">Black</button>
+              <button class="btn btn-ghost btn-sm" data-bgfill="blur">Blurred photo</button>
+              <input type="color" id="bgFillColor" value="#39ff9d" title="Pick a colour" style="width:34px; height:30px; padding:0; border:1px solid var(--line); border-radius:6px; background:transparent; cursor:pointer;"></div>
+          </div>
         </div>
 
         <!-- AI TOOLS (on-device) -->
@@ -1409,6 +1533,8 @@
     </div>
   </div>
 
+  <section class="wrap" id="recentSec" aria-label="Recent work"><div class="rc-head"><span>Recent work · saved on this device</span><button type="button" id="rcClear">Clear</button></div><div class="rc-list" id="rcList"></div></section>
+
   <section class="wrap" id="batchSec" style="max-width:900px; margin:30px auto;">
     <details class="adv-sec" id="bxBox"><summary>Batch studio — remove BG, resize, compress &amp; convert many images at once, free</summary><div class="adv-body">
       <p class="hint" style="margin-top:0;" id="bxHint">Pick many images, choose what to do, get one ZIP. Runs 100% on your device. Download is a sign-in step like Export.</p>
@@ -1431,16 +1557,27 @@
     <div class="wrap">
       <div class="section-head">
         <div class="eyebrow">The Stack</div>
-        <h2>Six tools. Zero uploads.</h2>
-        <p>Everything above runs in your browser, on your device — the same engine the desktop app uses, rebuilt for the web.</p>
+        <h2>Eleven tools. Zero uploads.</h2>
+        <p>Every kind of image job in one place — no hopping between sites, no uploading your photos, no sign-up to start editing. It all runs in your browser, on your device.</p>
       </div>
-      <div class="frame-grid">
-        <div class="frame reveal"><span class="frame-num">01</span><h3>Edit</h3><p>Filters, brightness, contrast, saturation, blur, rotate and flip — live on canvas.</p></div>
-        <div class="frame reveal"><span class="frame-num">02</span><h3>Convert</h3><p>PNG, JPEG, WebP, BMP, ICO or PDF — six formats, zero round trips to a server.</p></div>
-        <div class="frame reveal"><span class="frame-num">03</span><h3>Compress</h3><p>Smart target-size search keeps maximum quality at your file size budget.</p></div>
-        <div class="frame reveal"><span class="frame-num">04</span><h3>Remove BG</h3><p>On-device AI segmentation cuts your subject out — no upload, no wait in a queue.</p></div>
-        <div class="frame reveal"><span class="frame-num">05</span><h3>Resize</h3><p>Exact pixel or percent dimensions with step-down resampling for crisp, accurate results.</p></div>
-        <div class="frame reveal"><span class="frame-num">06</span><h3>Social</h3><p>Exact-size profile pictures, banners, posts and stories for 15 networks, with safe-zone guides.</p></div>
+      <ul class="pitch-row">
+        <li><b>Private by design</b> Your photos never leave your device.</li>
+        <li><b>No sign-up to edit</b> Open it and start. Free to use.</li>
+        <li><b>One place, not ten tabs</b> Edit, cut out, resize, convert, compress, batch.</li>
+        <li><b>Real results</b> Full-resolution output, exact file-size targets.</li>
+      </ul>
+      <div class="frame-grid f11">
+        <div class="frame reveal"><span class="frame-num">01</span><h3>Edit</h3><p>Filters, brightness, contrast, saturation, blur, rotate, flip — plus crop with ratio presets and straighten.</p></div>
+        <div class="frame reveal"><span class="frame-num">02</span><h3>Advanced</h3><p>Curves, HSL mixer, 3-way grading, clarity, grain, vignette and 3D LUT export for pro colour work.</p></div>
+        <div class="frame reveal"><span class="frame-num">03</span><h3>Remove Object</h3><p>Paint over a person, sign or blemish and on-device AI fills it to match its surroundings.</p></div>
+        <div class="frame reveal"><span class="frame-num">04</span><h3>Resize</h3><p>Exact pixel or percent dimensions with step-down resampling for crisp, accurate results.</p></div>
+        <div class="frame reveal"><span class="frame-num">05</span><h3>Convert</h3><p>PNG, JPEG, WebP, BMP, ICO, PSD or PDF — including HEIC photos in, multi-image PDF out.</p></div>
+        <div class="frame reveal"><span class="frame-num">06</span><h3>Compress</h3><p>Hit any file-size target with a live before/after size preview before you download.</p></div>
+        <div class="frame reveal"><span class="frame-num">07</span><h3>Remove BG</h3><p>On-device AI cuts your subject out; touch up with a brush and swap in a new background.</p></div>
+        <div class="frame reveal"><span class="frame-num">08</span><h3>AI Tools</h3><p>Background removal and object removal engines that run privately on your device.</p></div>
+        <div class="frame reveal"><span class="frame-num">09</span><h3>Layers</h3><p>Stack images, text and shapes, with blend modes, masks and PSD import and export.</p></div>
+        <div class="frame reveal"><span class="frame-num">10</span><h3>Social</h3><p>Exact-size profile pictures, banners, posts and stories for 15 networks, with safe-zone guides.</p></div>
+        <div class="frame reveal"><span class="frame-num">11</span><h3>Visual Intelligence</h3><p>Preflight checks that flag size, quality and privacy issues before you share.</p></div>
       </div>
     </div>
   </section>
@@ -1578,21 +1715,14 @@
     });
   })();
 
-  /* ---------------- boot screen ---------------- */
+  /* ---------------- opening animation ---------------- */
   (function boot(){
-    var lines = ['initializing kernel', 'mounting studio', 'loading tools', 'apic ready'];
-    var logEl = document.getElementById('bootLog');
-    var i = 0;
-    var iv = setInterval(function(){
-      i++;
-      if(i < lines.length){ logEl.innerHTML = lines[i] + '<b>_</b>'; }
-    }, 460);
+    var el = document.getElementById('bootScreen');
+    if(!el) return;
     setTimeout(function(){
-      clearInterval(iv);
-      var el = document.getElementById('bootScreen');
       el.classList.add('fade-out');
-      setTimeout(function(){ el.remove(); }, 500);
-    }, 2000);
+      setTimeout(function(){ el.remove(); }, 260);
+    }, 620);
   })();
 
   /* ---------------- theme ---------------- */
@@ -1933,7 +2063,8 @@
   var titles = {edit:'edit.exe', advanced:'advanced.exe', objremove:'removeobj.exe', resize:'resize.exe', convert:'convert.exe', compress:'compress.exe', bgremove:'removebg.exe', ai:'smartai.exe'};
   var activeTool = 'edit';
   var originalImg = null;   // pristine source
-  var rotation = 0, flipH = 1, flipV = 1;
+  var rotation = 0, flipH = 1, flipV = 1, straighten = 0;
+  var bgSrcCanvas = null;   // pre-removal pixels, kept so the BG touch-up brush can restore them
   var hasAlpha = false;     // true after background removal
 
   function updateGate(){
@@ -1961,7 +2092,7 @@
   function removeImage(){
     if(!originalImg) return;
     toolBtns[0].click();                       // back to the Edit tool while buttons are still enabled
-    originalImg = null; rotation = 0; flipH = 1; flipV = 1; hasAlpha = false;
+    originalImg = null; rotation = 0; flipH = 1; flipV = 1; hasAlpha = false; bgSrcCanvas = null;
     document.getElementById('resetEdit').click();
     document.getElementById('resetAdvanced').click();
     cropRect = null; maskBox = null;
@@ -2030,12 +2161,64 @@
     } else { cb(cnv.toDataURL('image/png')); }
   }
 
+  /* ---- HEIC / HEIF (iPhone photos): decoded on-device, nothing uploaded ---- */
+  function isHeicFile(f){ return !!f && (/^image\/hei[cf]/i.test(f.type || '') || /\.(heic|heif)$/i.test(f.name || '')); }
+  var __heicLib = null;
+  function loadHeicLib(){
+    if(window.heic2any) return Promise.resolve(window.heic2any);
+    if(__heicLib) return __heicLib;
+    __heicLib = new Promise(function(res, rej){
+      var sc = document.createElement('script');
+      sc.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+      sc.onload = function(){ window.heic2any ? res(window.heic2any) : rej(new Error('heic lib missing')); };
+      sc.onerror = function(){ __heicLib = null; rej(new Error('Could not load the HEIC decoder (offline?)')); };
+      document.head.appendChild(sc);
+    });
+    return __heicLib;
+  }
+  async function heicToBlob(file){
+    if(window.createImageBitmap){            // Safari decodes HEIC natively
+      try{
+        var bm = await createImageBitmap(file);
+        var c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height; c.getContext('2d').drawImage(bm, 0, 0);
+        var nb = await new Promise(function(r){ c.toBlob(r, 'image/jpeg', 0.95); });
+        if(nb) return nb;
+      }catch(e){}
+    }
+    var lib = await loadHeicLib();
+    var out = await lib({ blob: file, toType: 'image/jpeg', quality: 0.95 });
+    return Array.isArray(out) ? out[0] : out;
+  }
+  // Decode any image file (including HEIC) to something drawable on a canvas.
+  async function fileToDrawable(file){
+    var f = file;
+    if(isHeicFile(file)) f = await heicToBlob(file);
+    if(window.createImageBitmap){ try{ return await createImageBitmap(f); }catch(e){} }
+    return await new Promise(function(res, rej){
+      var u = URL.createObjectURL(f), im = new Image();
+      im.onload = function(){ res(im); }; im.onerror = function(){ rej(new Error('Could not read ' + (file.name || 'image'))); }; im.src = u;
+    });
+  }
+  var srcFileSize = 0;      // size of the file the user opened — used for the before/after size readouts
+
   function loadImage(file){
+    if(isHeicFile(file)){
+      fileInfo.textContent = 'Converting HEIC photo…';
+      heicToBlob(file).then(function(b){
+        var f2 = new File([b], (file.name || 'photo').replace(/\.(heic|heif)$/i, '') + '.jpg', { type: b.type || 'image/jpeg' });
+        f2.apicOrigSize = file.size; loadImage(f2);
+      }).catch(function(err){
+        fileInfo.textContent = 'No image loaded';
+        alert('This HEIC photo could not be opened: ' + ((err && err.message) || 'unsupported file') + '\n\nTip: on an iPhone, Settings → Camera → Formats → "Most Compatible" saves JPEGs.');
+      });
+      return;
+    }
     if(!file.type.startsWith('image/')) return;
+    srcFileSize = file.apicOrigSize || file.size || 0;
     try{ window.__apicPrivacyScan && window.__apicPrivacyScan(file); }catch(e){}
     var img = new Image();
     function finish(im, resized){
-      originalImg = im; rotation = 0; flipH = 1; flipV = 1; hasAlpha = false;
+      originalImg = im; rotation = 0; flipH = 1; flipV = 1; hasAlpha = false; bgSrcCanvas = null;
       canvas.width = im.naturalWidth; canvas.height = im.naturalHeight;
       canvas.style.display = 'block'; dropEl.classList.remove('has-alpha');
       dropEl.querySelector('svg').style.display = 'none';
@@ -2084,6 +2267,51 @@
     return parts.join(' ');
   }
 
+  // Scale that keeps the straightened picture covering the whole frame (no empty corners).
+  function straightenScale(nw, nh){
+    var a = Math.abs(straighten) * Math.PI/180;
+    if(!a) return 1;
+    return Math.cos(a) + Math.sin(a) * Math.max(nw/nh, nh/nw);
+  }
+  // While a slider is being dragged on a big photo, preview at reduced resolution (smooth),
+  // then do the full-resolution render once the slider is released.
+  var liveDrag = false, liveDirty = false, liveCv = null, liveCtx = null;
+  function renderLive(nw, nh, w, h){
+    var k = Math.min(1, Math.sqrt(1100000/(nw*nh)));
+    if(k > 0.9) return false;
+    var lw = Math.max(1, Math.round(nw*k)), lh = Math.max(1, Math.round(nh*k));
+    if(!liveCv){ liveCv = document.createElement('canvas'); liveCtx = liveCv.getContext('2d', {willReadFrequently:true}); }
+    if(liveCv.width !== lw) liveCv.width = lw;
+    if(liveCv.height !== lh) liveCv.height = lh;
+    var rc = canvas, rx = ctx;
+    canvas = liveCv; ctx = liveCtx;
+    try{
+      ctx.clearRect(0, 0, lw, lh);
+      ctx.save();
+      ctx.filter = comparing ? 'none' : currentFilterString().replace(/blur\(([\d.]+)px\)/, function(m, v){ return 'blur(' + (parseFloat(v)*k) + 'px)'; });
+      ctx.translate(lw/2, lh/2);
+      ctx.rotate((rotation + straighten) * Math.PI/180);
+      var sk = straightenScale(nw, nh);
+      ctx.scale(flipH*sk, flipV*sk);
+      ctx.drawImage(originalImg, -w*k/2, -h*k/2, w*k, h*k);
+      ctx.restore();
+      applyAdvancedFx();
+    } finally { canvas = rc; ctx = rx; }
+    ctx.clearRect(0, 0, nw, nh);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(liveCv, 0, 0, nw, nh);
+    liveDirty = true;
+    return true;
+  }
+  window.__apicEnsureFull = function(){ if(liveDirty){ liveDirty = false; liveDrag = false; render(); } };
+  document.addEventListener('pointerdown', function(e){
+    var t = e.target; liveDrag = !!(t && t.tagName === 'INPUT' && t.type === 'range');
+  }, true);
+  ['pointerup','pointercancel','touchend','mouseup','change'].forEach(function(ev){
+    document.addEventListener(ev, function(){ liveDrag = false; if(liveDirty){ liveDirty = false; render(); } }, true);
+  });
+  window.addEventListener('blur', function(){ liveDrag = false; if(liveDirty){ liveDirty = false; render(); } });
+
   function render(){
     if(!originalImg) return;
     var w = originalImg.naturalWidth, h = originalImg.naturalHeight;
@@ -2091,12 +2319,14 @@
     var nw = rotated ? h : w, nh = rotated ? w : h;
     if(canvas.width !== nw) canvas.width = nw;      // assigning even the same size wipes + reallocates the bitmap
     if(canvas.height !== nh) canvas.height = nh;
+    if(liveDrag && renderLive(nw, nh, w, h)) return;
     ctx.clearRect(0, 0, nw, nh);
     ctx.save();
     ctx.filter = comparing ? 'none' : currentFilterString();
     ctx.translate(canvas.width/2, canvas.height/2);
-    ctx.rotate(rotation * Math.PI/180);
-    ctx.scale(flipH, flipV);
+    ctx.rotate((rotation + straighten) * Math.PI/180);
+    var sk = straightenScale(nw, nh);
+    ctx.scale(flipH*sk, flipV*sk);
     ctx.drawImage(originalImg, -w/2, -h/2, w, h);
     ctx.restore();
     applyAdvancedFx();
@@ -2111,7 +2341,8 @@
   // Reset every adjustment that render() would otherwise re-apply on top of pixels that
   // already contain it (basic sliders, filter preset, and the whole Advanced panel incl. curves/white balance).
   function resetAdjustmentState(){
-    rotation = 0; flipH = 1; flipV = 1;
+    rotation = 0; flipH = 1; flipV = 1; straighten = 0;
+    var stEl = document.getElementById('editStraighten'); if(stEl){ stEl.value = 0; document.getElementById('editStraightenVal').textContent = '0°'; }
     document.getElementById('editFilter').value = 'none';
     document.getElementById('editBright').value = 100;
     document.getElementById('editContrast').value = 100;
@@ -2144,11 +2375,11 @@
      CAPACITY: main-photo history is device-dependent — 40 snapshots on desktop, 10 on normal
      mobile, 5 on low-tier mobile. The initial (loaded) state occupies one snapshot, so the number
      of undoable operations is HIST_MAX - 1. Layers keep a SEPARATE history (60 snapshots). */
-  var HIST_MAX = (function(){ var t = deviceTier(); return t === 'desktop' ? 40 : (t === 'low' ? 5 : 10); })();
+  var HIST_MAX = (function(){ var t = deviceTier(); return t === 'desktop' ? 60 : (t === 'low' ? 8 : 20); })();
   var history = [];
   var histIndex = -1;
   var restoringHistory = false;
-  var HIST_FIELD_IDS = ['editFilter','editFilterMore','editBright','editContrast','editSaturate','editBlur',
+  var HIST_FIELD_IDS = ['editFilter','editFilterMore','editBright','editContrast','editSaturate','editBlur','editStraighten',
     'advBlack','advWhite','advGamma','advSharpen','advTemp','advVignette','advHue'];
   var undoBtn = document.getElementById('undoBtn');
   var redoBtn = document.getElementById('redoBtn');
@@ -2174,26 +2405,36 @@
   function updateHistoryButtons(){
     if(undoBtn) undoBtn.disabled = histIndex <= 0;
     if(redoBtn) redoBtn.disabled = histIndex >= history.length-1;
+    try{ if(window.__apicLayers && window.__apicLayers.btns) window.__apicLayers.btns(); }catch(e){}
   }
   function commitHistory(){
     if(restoringHistory || !originalImg) return;
+    var LY = window.__apicLayers, lyOn = !!(LY && LY.snapshot);
     var snapshot = { src: originalImg.src, rotation: rotation, flipH: flipH, flipV: flipV, fields: captureFields() };
+    if(lyOn){
+      var ls = window.__apicFlattening ? { l: [], sel: null, sig: '[]' } : LY.snapshot();
+      snapshot.layers = ls; snapshot.lsig = ls.sig;
+    }
     history = history.slice(0, histIndex+1);
     var last = history[history.length-1];
     if(last && last.src === snapshot.src && JSON.stringify(last.fields) === JSON.stringify(snapshot.fields) &&
-       last.rotation === snapshot.rotation && last.flipH === snapshot.flipH && last.flipV === snapshot.flipV) return;
+       last.rotation === snapshot.rotation && last.flipH === snapshot.flipH && last.flipV === snapshot.flipV &&
+       (last.lsig || '[]') === (snapshot.lsig || '[]')) return;
     history.push(snapshot);
     if(history.length > HIST_MAX) history.shift();
     histIndex = history.length - 1;
     updateHistoryButtons();
     pruneUrls();
+    try{ document.dispatchEvent(new CustomEvent('apic:committed')); }catch(e){}
   }
   function restoreSnapshot(snapshot){
     restoringHistory = true;
     rotation = snapshot.rotation; flipH = snapshot.flipH; flipV = snapshot.flipV;
     applyFields(snapshot.fields);
     var finish = function(){
+      try{ if(window.__apicLayers && window.__apicLayers.restore) window.__apicLayers.restore(snapshot.layers || null); }catch(e){}
       render(); syncOverlay();
+      try{ if(window.__apicCompressLive) window.__apicCompressLive(); }catch(e){}
       restoringHistory = false;
       updateHistoryButtons();
     };
@@ -2207,6 +2448,11 @@
   }
   function undoHistory(){ if(histIndex > 0){ histIndex--; restoreSnapshot(history[histIndex]); } }
   function redoHistory(){ if(histIndex < history.length-1){ histIndex++; restoreSnapshot(history[histIndex]); } }
+  // One undo history for everything (photo edits, object/background removal, layers, flatten).
+  window.__apicUndo = undoHistory; window.__apicRedo = redoHistory;
+  window.__apicCommit = commitHistory;
+  window.__apicCanUndo = function(){ return histIndex > 0; };
+  window.__apicCanRedo = function(){ return histIndex < history.length-1; };
   if(undoBtn) undoBtn.addEventListener('click', undoHistory);
   if(redoBtn) redoBtn.addEventListener('click', redoHistory);
   window.addEventListener('keydown', function(e){
@@ -2228,6 +2474,75 @@
   var maskCanvas = document.createElement('canvas'); // full-res binary mask for inpaint, 255=paint
   var mctx = maskCanvas.getContext('2d');
   var cropRect = null; // {x,y,w,h} in canvas pixel space
+  var editSelecting = false, cropMoving = null, bgPainting = false, bgLast = null, viewSize = '';
+  function bgTouchReady(){ return !!(bgSrcCanvas && originalImg && bgSrcCanvas.width === canvas.width && bgSrcCanvas.height === canvas.height); }
+  function cropRatioVal(){ var el = document.getElementById('cropRatio'); var r = el ? parseFloat(el.value) : 0; return (activeTool === 'edit' && r > 0) ? r : 0; }
+
+  /* ---- zoom / pan (pinch, buttons, Ctrl+wheel, hand tool, Space+drag) so brush work can be precise ---- */
+  var view = {z:1, x:0, y:0}, handMode = false, spaceDown = false, gest = null, panDrag = null;
+  function viewApply(){
+    var t = (view.z === 1 && !view.x && !view.y) ? '' : 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.z + ')';
+    [canvas, overlay].forEach(function(el){ el.style.transformOrigin = t ? '0 0' : ''; el.style.transform = t; });
+    updateZoomBar();
+  }
+  function viewClamp(){
+    var W = overlay.clientWidth, H = overlay.clientHeight;
+    view.x = Math.min(W - 40, Math.max(40 - W*view.z, view.x));
+    view.y = Math.min(H - 40, Math.max(40 - H*view.z, view.y));
+  }
+  function viewReset(){ view.z = 1; view.x = 0; view.y = 0; viewApply(); }
+  function viewZoomAt(nz, cx, cy){
+    nz = Math.min(10, Math.max(1, nz));
+    if(nz === 1){ viewReset(); return; }
+    var r = overlay.getBoundingClientRect();
+    var ox = r.left - view.x, oy = r.top - view.y;
+    var lx = (cx - r.left)/view.z, ly = (cy - r.top)/view.z;
+    view.z = nz; view.x = cx - ox - lx*nz; view.y = cy - oy - ly*nz;
+    viewClamp(); viewApply();
+  }
+  function zoomable(){ return overlay.classList.contains('active'); }
+  var zoomBar = document.createElement('div'); zoomBar.id = 'zoomBar';
+  zoomBar.innerHTML = '<button type="button" data-z="out" title="Zoom out">−</button><span id="zoomPct">100%</span><button type="button" data-z="in" title="Zoom in">+</button><button type="button" data-z="fit" title="Fit to view">Fit</button><button type="button" data-z="hand" title="Move the photo (hold Space, or two fingers)">✋</button>';
+  dropEl.appendChild(zoomBar);
+  ['click','mousedown','touchstart'].forEach(function(ev){ zoomBar.addEventListener(ev, function(e){ e.stopPropagation(); if(ev === 'click') e.preventDefault(); }, {passive:false}); });
+  zoomBar.addEventListener('click', function(e){
+    var b = e.target.closest('button'); if(!b) return;
+    var r = overlay.getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2, d = b.dataset.z;
+    if(d === 'in') viewZoomAt(view.z*1.5, cx, cy);
+    else if(d === 'out') viewZoomAt(view.z/1.5, cx, cy);
+    else if(d === 'fit') viewReset();
+    else if(d === 'hand'){ handMode = !handMode; updateZoomBar(); }
+  });
+  function updateZoomBar(){
+    zoomBar.classList.toggle('show', zoomable());
+    document.getElementById('zoomPct').textContent = Math.round(view.z*100) + '%';
+    zoomBar.querySelector('[data-z=hand]').classList.toggle('on', handMode);
+    overlay.style.cursor = handMode ? 'grab' : '';
+  }
+  overlay.addEventListener('wheel', function(e){
+    if(!zoomable() || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault(); viewZoomAt(view.z*Math.exp(-e.deltaY*0.01), e.clientX, e.clientY);
+  }, {passive:false});
+  window.addEventListener('keydown', function(e){
+    if(e.code !== 'Space' || !zoomable()) return;
+    var tg = (e.target && e.target.tagName) || ''; if(/INPUT|TEXTAREA|SELECT|BUTTON/.test(tg)) return;
+    spaceDown = true; e.preventDefault();
+  });
+  window.addEventListener('keyup', function(e){ if(e.code === 'Space') spaceDown = false; });
+  function clientXY(e){ var t = e.touches ? e.touches[0] : e; return {x: t.clientX, y: t.clientY}; }
+  function startGesture(e){
+    e.preventDefault(); painting = false; cropping = false; cropMoving = null; bgPainting = false; panDrag = null;
+    var a = e.touches[0], b = e.touches[1];
+    gest = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, cx: (a.clientX + b.clientX)/2, cy: (a.clientY + b.clientY)/2 };
+  }
+  function moveGesture(e){
+    e.preventDefault();
+    var a = e.touches[0], b = e.touches[1];
+    var d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, cx = (a.clientX + b.clientX)/2, cy = (a.clientY + b.clientY)/2;
+    viewZoomAt(view.z*d/gest.d, cx, cy);
+    view.x += cx - gest.cx; view.y += cy - gest.cy; viewClamp(); viewApply();
+    gest.d = d; gest.cx = cx; gest.cy = cy;
+  }
   var painting = false, cropping = false, cropStart = null;
   var maskBox = null; // bounds of painted pixels {x0,y0,x1,y1} in canvas px — lets object removal touch only that region
 
@@ -2240,9 +2555,11 @@
     overlay.style.top = canvas.offsetTop + 'px';
     overlay.style.width = canvas.clientWidth + 'px';
     overlay.style.height = canvas.clientHeight + 'px';
-    var showOverlay = (activeTool === 'objremove' || activeTool === 'advanced');
+    var showOverlay = (activeTool === 'objremove' || activeTool === 'advanced' || (activeTool === 'edit' && editSelecting) || (activeTool === 'bgremove' && bgTouchReady()));
     overlay.style.display = showOverlay ? 'block' : 'none';
     overlay.classList.toggle('active', showOverlay);
+    if(overlay.width + 'x' + overlay.height !== viewSize){ viewSize = overlay.width + 'x' + overlay.height; viewReset(); }
+    updateBgTouch(); updateZoomBar();
     redrawOverlay();
   }
   window.addEventListener('resize', function(){ if(overlay.style.display !== 'none'){ overlay.style.left = canvas.offsetLeft+'px'; overlay.style.top = canvas.offsetTop+'px'; overlay.style.width = canvas.clientWidth+'px'; overlay.style.height = canvas.clientHeight+'px'; } });
@@ -2253,7 +2570,7 @@
       octx.save(); octx.globalAlpha = 0.65;
       octx.drawImage(maskCanvas, 0, 0);
       octx.restore();
-    } else if(activeTool === 'advanced' && cropRect){
+    } else if((activeTool === 'advanced' || (activeTool === 'edit' && editSelecting)) && cropRect){
       octx.save();
       octx.fillStyle = 'rgba(0,0,0,0.55)';
       octx.fillRect(0,0,overlay.width,overlay.height);
@@ -2275,30 +2592,152 @@
   function pointerDown(e){
     if(!originalImg) return;
     e.preventDefault();
+    if(e.touches && e.touches.length >= 2){ startGesture(e); return; }
+    if(handMode || spaceDown || e.button === 1){ var c0 = clientXY(e); panDrag = {x: c0.x, y: c0.y}; overlay.style.cursor = 'grabbing'; return; }
     var p = overlayPoint(e);
     if(activeTool === 'objremove'){
       painting = true; lastPaintPt = null; paintDab(p);
-    } else if(activeTool === 'advanced'){
-      cropping = true; cropStart = p; cropRect = {x:p.x, y:p.y, w:0, h:0};
+    } else if(activeTool === 'bgremove'){
+      bgPainting = true; bgLast = null; bgDab(p);
+    } else if(activeTool === 'advanced' || activeTool === 'edit'){
+      if(cropRect && cropRect.w > 4 && cropRect.h > 4 && p.x >= cropRect.x && p.x <= cropRect.x + cropRect.w && p.y >= cropRect.y && p.y <= cropRect.y + cropRect.h){
+        cropMoving = {dx: p.x - cropRect.x, dy: p.y - cropRect.y};
+      } else {
+        cropping = true; cropStart = p; cropRect = {x:p.x, y:p.y, w:0, h:0};
+      }
     }
   }
   function pointerMove(e){
     if(!originalImg) return;
+    if(gest && e.touches && e.touches.length >= 2){ moveGesture(e); return; }
+    if(panDrag){
+      e.preventDefault(); var c1 = clientXY(e);
+      view.x += c1.x - panDrag.x; view.y += c1.y - panDrag.y; panDrag.x = c1.x; panDrag.y = c1.y; viewClamp(); viewApply(); return;
+    }
+    if(e.touches && e.touches.length > 1) return;
     var p = overlayPoint(e);
     if(painting){ e.preventDefault(); paintDab(p); }
+    else if(bgPainting){ e.preventDefault(); bgDab(p); }
+    else if(cropMoving){
+      e.preventDefault();
+      cropRect.x = Math.min(canvas.width - cropRect.w, Math.max(0, p.x - cropMoving.dx));
+      cropRect.y = Math.min(canvas.height - cropRect.h, Math.max(0, p.y - cropMoving.dy));
+      redrawOverlay();
+    }
     else if(cropping){
       e.preventDefault();
-      cropRect = { x: Math.min(cropStart.x,p.x), y: Math.min(cropStart.y,p.y), w: Math.abs(p.x-cropStart.x), h: Math.abs(p.y-cropStart.y) };
+      var W = canvas.width, H = canvas.height, x0 = cropStart.x, y0 = cropStart.y, r = cropRatioVal();
+      var dirx = p.x < x0 ? -1 : 1, diry = p.y < y0 ? -1 : 1;
+      var maxW = dirx > 0 ? W - x0 : x0, maxH = diry > 0 ? H - y0 : y0;
+      var aw = Math.min(Math.abs(p.x - x0), maxW), ah = Math.min(Math.abs(p.y - y0), maxH);
+      if(r > 0){
+        if(aw/Math.max(ah, 1e-6) > r) aw = ah*r; else ah = aw/r;
+        if(aw > maxW){ aw = maxW; ah = aw/r; }
+        if(ah > maxH){ ah = maxH; aw = ah*r; }
+      }
+      cropRect = { x: dirx > 0 ? x0 : x0 - aw, y: diry > 0 ? y0 : y0 - ah, w: aw, h: ah };
       redrawOverlay();
     }
   }
-  function pointerUp(){ painting = false; cropping = false; lastPaintPt = null; }
+  function pointerUp(e){
+    if(e && e.touches && e.touches.length >= 1 && gest){ if(e.touches.length < 2) gest = null; return; }
+    gest = null;
+    if(panDrag){ panDrag = null; updateZoomBar(); }
+    painting = false; cropping = false; cropMoving = null; lastPaintPt = null;
+    if(bgPainting){ bgPainting = false; bgLast = null; bakeToOriginal(function(){ syncOverlay(); }); }
+  }
+  /* ---- Remove BG touch-up: restore / erase brush + one-click background ---- */
+  function bgDab(p){
+    var size = Math.max(2, (parseInt(document.getElementById('bgBrushSize').value, 10) || 28) * (overlay.width / ((overlay.clientWidth || overlay.width) * view.z)));
+    var restore = document.getElementById('bgBrushMode').value === 'restore', r = size/2;
+    var from = bgLast || p, dist = Math.hypot(p.x - from.x, p.y - from.y), step = Math.max(1, r/3), n = Math.max(1, Math.ceil(dist/step));
+    for(var i=1; i<=n; i++){
+      var x = from.x + (p.x - from.x)*i/n, y = from.y + (p.y - from.y)*i/n;
+      ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.clip();
+      var bx = Math.max(0, Math.floor(x - r)), by = Math.max(0, Math.floor(y - r));
+      var bw = Math.min(canvas.width - bx, Math.ceil(r*2) + 2), bh = Math.min(canvas.height - by, Math.ceil(r*2) + 2);
+      ctx.clearRect(bx, by, bw, bh);
+      if(restore) ctx.drawImage(bgSrcCanvas, bx, by, bw, bh, bx, by, bw, bh);
+      ctx.restore();
+    }
+    bgLast = {x: p.x, y: p.y};
+    var oc = overlay.getContext('2d'); oc.clearRect(0, 0, overlay.width, overlay.height);
+    oc.save(); oc.strokeStyle = restore ? '#39ff9d' : '#ff3b6b'; oc.lineWidth = Math.max(1, 2*overlay.width/Math.max(1, overlay.clientWidth*view.z)); oc.beginPath(); oc.arc(p.x, p.y, r, 0, Math.PI*2); oc.stroke(); oc.restore();
+  }
+  function updateBgTouch(){ var bt = document.getElementById('bgTouch'); if(bt) bt.style.display = bgTouchReady() ? 'block' : 'none'; }
+  (function(){
+    var sz = document.getElementById('bgBrushSize'), szv = document.getElementById('bgBrushSizeVal');
+    sz.addEventListener('input', function(){ szv.textContent = sz.value; });
+    function fillWith(kind, color){
+      if(!bgTouchReady() && kind === 'blur') return;
+      var W = canvas.width, H = canvas.height, out = document.createElement('canvas'); out.width = W; out.height = H;
+      var g = out.getContext('2d');
+      if(kind === 'blur'){
+        var rad = Math.max(6, Math.round(Math.max(W, H)/55)), pad = rad*3;
+        g.filter = 'blur(' + rad + 'px)'; g.drawImage(bgSrcCanvas, -pad, -pad, W + pad*2, H + pad*2); g.filter = 'none';
+      } else { g.fillStyle = color; g.fillRect(0, 0, W, H); }
+      g.drawImage(canvas, 0, 0);
+      ctx.clearRect(0, 0, W, H); ctx.drawImage(out, 0, 0);
+      if(kind !== 'blur' || true){ hasAlpha = false; dropEl.classList.remove('has-alpha'); }
+      bakeToOriginal(function(){ render(); syncOverlay(); });
+    }
+    document.querySelectorAll('[data-bgfill]').forEach(function(b){
+      b.addEventListener('click', function(){ var k = b.dataset.bgfill; fillWith(k, k === 'black' ? '#000000' : '#ffffff'); });
+    });
+    document.getElementById('bgFillColor').addEventListener('change', function(){ fillWith('color', this.value); });
+  })();
+  /* ---- Edit tab: crop shapes + selection + blur / pixelate area ---- */
+  (function(){
+    var tog = document.getElementById('selToggle'), ratio = document.getElementById('cropRatio');
+    function setSel(v){ editSelecting = v; tog.textContent = v ? 'Done selecting' : 'Select area'; syncOverlay(); }
+    tog.addEventListener('click', function(){ setSel(!editSelecting); });
+    ratio.addEventListener('change', function(){
+      var r = parseFloat(ratio.value);
+      if(r < 0) return;
+      setSel(true);
+      if(r > 0 && canvas.width){
+        var w = Math.min(canvas.width, canvas.height*r), h = w/r;
+        cropRect = { x: (canvas.width - w)/2, y: (canvas.height - h)/2, w: w, h: h };
+      }
+      redrawOverlay();
+    });
+    document.getElementById('cropClearE').addEventListener('click', function(){ cropRect = null; redrawOverlay(); });
+    document.getElementById('cropApplyE').addEventListener('click', function(){
+      if(!cropRect || cropRect.w < 4 || cropRect.h < 4){ setSel(true); return; }
+      document.getElementById('applyCrop').click(); setSel(false);
+    });
+    document.getElementById('regionApply').addEventListener('click', function(){
+      if(!originalImg){ return; }
+      if(!cropRect || cropRect.w < 4 || cropRect.h < 4){ setSel(true); return; }
+      var x = Math.max(0, Math.round(cropRect.x)), y = Math.max(0, Math.round(cropRect.y));
+      var w = Math.min(canvas.width - x, Math.round(cropRect.w)), h = Math.min(canvas.height - y, Math.round(cropRect.h));
+      if(w < 2 || h < 2) return;
+      var amt = (parseInt(document.getElementById('regionAmt').value, 10) || 60)/100, mode = document.getElementById('regionMode').value;
+      var big = Math.max(canvas.width, canvas.height);
+      if(mode === 'pixelate'){
+        var block = Math.max(3, Math.round(3 + amt*big/22));
+        var sw = Math.max(1, Math.ceil(w/block)), sh = Math.max(1, Math.ceil(h/block));
+        var t = document.createElement('canvas'); t.width = sw; t.height = sh;
+        var tc = t.getContext('2d'); tc.imageSmoothingEnabled = true; tc.drawImage(canvas, x, y, w, h, 0, 0, sw, sh);
+        ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+        ctx.imageSmoothingEnabled = false; ctx.drawImage(t, 0, 0, sw, sh, x, y, sw*block, sh*block); ctx.restore();
+      } else {
+        var rad = Math.max(2, Math.round(2 + amt*big/45)), pad = Math.ceil(rad*2.5);
+        var t2 = document.createElement('canvas'); t2.width = w + pad*2; t2.height = h + pad*2;
+        var t2c = t2.getContext('2d'); t2c.filter = 'blur(' + rad + 'px)';
+        t2c.drawImage(canvas, x - pad, y - pad, w + pad*2, h + pad*2, 0, 0, w + pad*2, h + pad*2);
+        ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); ctx.drawImage(t2, x - pad, y - pad); ctx.restore();
+      }
+      cropRect = null; redrawOverlay();
+      bakeToOriginal(function(){ render(); syncOverlay(); });
+    });
+  })();
   var lastPaintPt = null;
   // Brush size is in ON-SCREEN pixels, so it feels the same on a phone (big photo shrunk
   // to fit) as on a laptop; converted to image pixels here.
   function brushCanvasSize(){
     var sizeCss = parseInt(document.getElementById('orBrush').value, 10) || 30;
-    var cw = overlay.clientWidth || overlay.width;
+    var cw = (overlay.clientWidth || overlay.width) * (view ? view.z : 1);
     var k = cw ? overlay.width / cw : 1;
     return Math.max(2, sizeCss * k);
   }
@@ -2987,6 +3426,7 @@
         if(useUltra){
           try{ await aiInpaint(statusEl, R, 'lama'); label = 'Ultra AI fill'; }
           catch(eU){
+            if(eU && eU.apicCancelled) throw eU;
             console.warn('Ultra (LaMa) failed, using MI-GAN instead:', eU);
             statusEl.innerHTML = '<span class="spinner"></span> Ultra engine unavailable — using standard AI…';
             await aiInpaint(statusEl, R, 'migan');
@@ -3000,6 +3440,7 @@
         statusEl.textContent = '✓ done (' + label + ')';
         btn.disabled = false; releaseOverlay();
       } catch(err){
+        if(err && err.apicCancelled){ statusEl.textContent = 'Download cancelled — nothing was changed.'; btn.disabled = false; releaseOverlay(); return; }
         console.error('AI object removal failed, falling back to patch fill:', err);
         statusEl.innerHTML = '<span class="spinner"></span> AI engine unavailable — quick filling…';
         setTimeout(function(){
@@ -3040,7 +3481,7 @@
   (function(){
     var q = document.getElementById('orQuality'); if(!q) return;
     if(deviceTier() !== 'desktop'){ for(var oi = q.options.length - 1; oi >= 0; oi--){ if(q.options[oi].value === 'ultra') q.remove(oi); } q.value = 'best'; }
-    else { q.value = 'ultra'; }
+    else { q.value = 'best'; }
   })();
 
 /* ======================= ADVANCED: PRO COLOUR SUITE =======================
@@ -3769,6 +4210,8 @@
       toolTitle.textContent = titles[activeTool];
       if(activeTool === 'resize') syncResizeFields();
       if(activeTool === 'objremove' && window.prewarmInpaint) window.prewarmInpaint();
+      if(activeTool !== 'edit' && editSelecting){ editSelecting = false; document.getElementById('selToggle').textContent = 'Select area'; }
+      viewReset();
       syncOverlay();
     });
   });
@@ -3786,12 +4229,22 @@
   ['editFilter','editFilterMore','editBright','editContrast','editSaturate','editBlur'].forEach(function(id){
     document.getElementById(id).addEventListener('change', function(){ commitHistory(); });
   });
+  (function(){
+    var st = document.getElementById('editStraighten');
+    st.addEventListener('input', function(){
+      straighten = parseFloat(st.value) || 0;
+      document.getElementById('editStraightenVal').textContent = (straighten > 0 ? '+' : '') + straighten + '°';
+      render();
+    });
+    st.addEventListener('change', function(){ commitHistory(); });
+  })();
   document.getElementById('resetEdit').addEventListener('click', function(){
     document.getElementById('editFilter').value = 'none';
     document.getElementById('editBright').value = 100;
     document.getElementById('editContrast').value = 100;
     document.getElementById('editSaturate').value = 100;
     document.getElementById('editBlur').value = 0;
+    straighten = 0; document.getElementById('editStraighten').value = 0; document.getElementById('editStraightenVal').textContent = '0°';
     document.getElementById('editBrightVal').textContent = '100%';
     document.getElementById('editContrastVal').textContent = '100%';
     document.getElementById('editSaturateVal').textContent = '100%';
@@ -4196,56 +4649,287 @@
   window.__apicBatchSave = function(b, n){ download(b, n); };
   window.__apicBatchSignIn = function(){ openModal(); };
 
+  /* ---------------- one Export experience (same on every tab) ----------------
+     Format, quality / target size, dimensions and a live size readout in one dialog, no matter which tab you're on.
+     The tab you came from only chooses sensible starting values (Convert → its format, Compress → its settings). */
+  var AVIF_OK = false;
+  try{ AVIF_OK = document.createElement('canvas').toDataURL('image/avif').indexOf('data:image/avif') === 0; }catch(e){}
+  (function(){ var o = document.getElementById('optAvif'); if(o && AVIF_OK) o.hidden = false; })();
+
+  function fmtBytes(n){ return n >= 1048576 ? (n/1048576).toFixed(2) + ' MB' : Math.max(1, Math.round(n/1024)) + ' KB'; }
+  function extFromBlob(blob, want){
+    var t = (blob && blob.type) || '';
+    if(t === 'image/jpeg') return 'jpg'; if(t === 'image/webp') return 'webp'; if(t === 'image/avif') return 'avif'; if(t === 'image/png') return 'png';
+    return want;
+  }
+  async function findQualityMime(c, targetBytes, mime){
+    var lo = 0.05, hi = 0.98, best = null;
+    for(var iter=0; iter<7; iter++){
+      var mid = (lo+hi)/2, blob = await canvasToBlob(c, mime, mid);
+      if(blob && blob.size <= targetBytes){ best = {blob:blob, q:mid}; lo = mid; } else { hi = mid; }
+    }
+    if(!best){ var fl = await canvasToBlob(c, mime, 0.05); return {blob: fl, q: 0.05, met: fl.size <= targetBytes}; }
+    best.met = true; return best;
+  }
+  async function compressToTargetMime(c, targetBytes, mime){
+    var res = await findQualityMime(c, targetBytes, mime), cur = c, scaled = false;
+    for(var i=0; i<8 && !res.met; i++){
+      var nw = Math.max(1, Math.round(cur.width*0.8)), nh = Math.max(1, Math.round(cur.height*0.8));
+      if(nw === cur.width && nh === cur.height) break;
+      var nx = document.createElement('canvas'); nx.width = nw; nx.height = nh;
+      var nc = nx.getContext('2d'); nc.imageSmoothingQuality = 'high'; nc.drawImage(cur, 0, 0, nw, nh);
+      cur = nx; scaled = true; res = await findQualityMime(cur, targetBytes, mime);
+    }
+    res.width = cur.width; res.height = cur.height; res.scaled = scaled; return res;
+  }
+  // Multi-page PDF from several JPEG pages.
+  function imagesToPDF(pages){
+    var enc = new TextEncoder(), parts = [], offset = 0, offsets = [];
+    function push(x){ var bt = (typeof x === 'string') ? enc.encode(x) : x; parts.push(bt); offset += bt.length; }
+    var n = pages.length, kids = [];
+    for(var i=0; i<n; i++) kids.push((3 + i*3) + ' 0 R');
+    push('%PDF-1.4\n');
+    offsets[1] = offset; push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    offsets[2] = offset; push('2 0 obj\n<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + n + ' >>\nendobj\n');
+    for(var j=0; j<n; j++){
+      var pg = pages[j], po = 3 + j*3, io = po + 1, co = po + 2, jb = new Uint8Array(pg.jpeg);
+      offsets[po] = offset; push(po + ' 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + pg.w + ' ' + pg.h + '] /Resources << /XObject << /Im0 ' + io + ' 0 R >> >> /Contents ' + co + ' 0 R >>\nendobj\n');
+      offsets[io] = offset; push(io + ' 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + pg.w + ' /Height ' + pg.h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jb.length + ' >>\nstream\n');
+      push(jb); push('\nendstream\nendobj\n');
+      var content = 'q ' + pg.w + ' 0 0 ' + pg.h + ' 0 0 cm /Im0 Do Q';
+      offsets[co] = offset; push(co + ' 0 obj\n<< /Length ' + content.length + ' >>\nstream\n' + content + '\nendstream\nendobj\n');
+    }
+    var total = 3 + n*3, xrefOffset = offset, xref = 'xref\n0 ' + total + '\n0000000000 65535 f \n';
+    for(var k=1; k<total; k++) xref += String(offsets[k]).padStart(10, '0') + ' 00000 n \n';
+    push(xref); push('trailer\n<< /Size ' + total + ' /Root 1 0 R >>\nstartxref\n' + xrefOffset + '\n%%EOF');
+    var len = parts.reduce(function(a, q){ return a + q.length; }, 0), out = new Uint8Array(len), pos = 0;
+    parts.forEach(function(q){ out.set(q, pos); pos += q.length; });
+    return new Blob([out], {type: 'application/pdf'});
+  }
+  var exPdfExtras = [];     // extra images for a multi-page PDF (File objects)
+  async function encodeFor(st){
+    var W = Math.max(1, Math.round(st.w || canvas.width)), H = Math.max(1, Math.round(st.h || canvas.height));
+    var src = (W !== canvas.width || H !== canvas.height) ? highQualityResize(canvas, W, H) : canvas;
+    var out = {w: src.width, h: src.height}, f = st.fmt;
+    if(f === 'png'){ out.blob = await canvasToBlob(src, 'image/png'); }
+    else if(f === 'jpeg' || f === 'webp' || f === 'avif'){
+      var mime = 'image/' + f, c2 = (f === 'jpeg') ? flattenToWhite(src) : src;
+      if(st.target){
+        var r = await compressToTargetMime(c2, st.targetKB*1024, mime);
+        out.blob = r.blob; out.w = r.width; out.h = r.height; out.met = r.met; out.scaled = r.scaled; out.q = r.q;
+      } else { out.blob = await canvasToBlob(c2, mime, st.q); out.q = st.q; }
+    }
+    else if(f === 'bmp'){ out.blob = canvasToBMP(flattenToWhite(src)); out.ext = 'bmp'; }
+    else if(f === 'ico'){
+      var size = Math.min(256, Math.max(canvas.width, canvas.height)), sq = document.createElement('canvas'); sq.width = size; sq.height = size;
+      sq.getContext('2d').drawImage(canvas, 0, 0, size, size);
+      out.blob = pngToICO(await (await canvasToBlob(sq, 'image/png')).arrayBuffer(), size); out.ext = 'ico'; out.w = out.h = size;
+    }
+    else if(f === 'psd'){
+      if(!window.__apicLayers || !window.__apicLayers.psdBlob) throw new Error('PSD export is not available right now.');
+      out.blob = await window.__apicLayers.psdBlob(); out.ext = 'psd'; out.w = canvas.width; out.h = canvas.height;
+    }
+    else if(f === 'pdf'){
+      var pages = [], q0 = st.q || 0.92;
+      var first = flattenToWhite(src);
+      pages.push({ jpeg: await (await canvasToBlob(first, 'image/jpeg', q0)).arrayBuffer(), w: first.width, h: first.height });
+      for(var i=0; i<exPdfExtras.length; i++){
+        var d = await fileToDrawable(exPdfExtras[i]), pc = document.createElement('canvas');
+        pc.width = d.width || d.naturalWidth; pc.height = d.height || d.naturalHeight;
+        var pg = pc.getContext('2d'); pg.fillStyle = '#fff'; pg.fillRect(0, 0, pc.width, pc.height); pg.drawImage(d, 0, 0);
+        pages.push({ jpeg: await (await canvasToBlob(pc, 'image/jpeg', q0)).arrayBuffer(), w: pc.width, h: pc.height });
+      }
+      out.blob = imagesToPDF(pages); out.ext = 'pdf'; out.pages = pages.length;
+    }
+    if(!out.ext) out.ext = extFromBlob(out.blob, f === 'jpeg' ? 'jpg' : f);
+    return out;
+  }
+
+  /* ---- Export dialog ---- */
+  var EX_KEY = 'apic_export_v1';
+  function exLoad(){ try{ return JSON.parse(localStorage.getItem(EX_KEY) || 'null') || {}; }catch(e){ return {}; } }
+  function exSave(st){ try{ localStorage.setItem(EX_KEY, JSON.stringify({fmt: st.fmt, q: st.q, target: st.target, targetKB: st.targetKB})); }catch(e){} }
+  function exDefaults(){
+    var d = exLoad(), st = { fmt: d.fmt || 'png', q: d.q || 0.92, target: !!d.target, targetKB: d.targetKB || 200 };
+    if(activeTool === 'convert'){ st.fmt = document.getElementById('convertFormat').value; st.target = false; }
+    else if(activeTool === 'compress'){
+      var cs = compressSettings(); st.fmt = cs.fmt; st.q = cs.q; st.target = cs.target; st.targetKB = cs.targetKB;
+    }
+    if(st.fmt === 'avif' && !AVIF_OK) st.fmt = 'webp';
+    return st;
+  }
+  var exEl = null, exTok = 0, exResolve = null, exTimer = 0;
+  function buildExport(){
+    if(exEl) return;
+    var css = document.createElement('style');
+    css.textContent =
+      '#apicEx{position:fixed; inset:0; z-index:9999; background:rgba(3,4,6,0.72); display:none; align-items:center; justify-content:center; padding:16px; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);}' +
+      '#apicEx.show{display:flex;}' +
+      '#apicEx .mk{width:100%; max-width:440px; max-height:calc(100vh - 32px); overflow:auto; background:var(--bg-2); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow-lift); padding:22px; color:var(--text); font-family:var(--sans);}' +
+      '#apicEx h3{font-family:var(--display); font-size:18px; margin:0 0 14px; font-weight:700;}' +
+      '#apicEx .row{margin-bottom:10px;}' +
+      '#apicEx select, #apicEx input[type=number]{background:var(--bg-3); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:13px var(--sans); min-height:38px; max-width:100%;}' +
+      '#apicEx input[type=number]{width:92px;}' +
+      '#apicEx .exchk{width:auto; text-transform:none; letter-spacing:0; font-family:var(--sans); font-size:12.5px; color:var(--text); display:inline-flex; align-items:center; gap:6px; cursor:pointer;}' +
+      '#apicEx .exchk input{accent-color:var(--green); width:16px; height:16px;}' +
+      '#apicEx #exInfo{display:block; font:600 12.5px var(--mono); line-height:1.5; margin:4px 0 14px; padding:10px 12px; border-radius:8px; background:var(--bg-3); border-left:3px solid var(--green);}' +
+      '#apicEx .exbtns{display:flex; gap:8px;}' +
+      '#apicEx .exbtns .btn{flex:1; justify-content:center;}';
+    document.head.appendChild(css);
+    exEl = document.createElement('div'); exEl.id = 'apicEx';
+    exEl.innerHTML =
+      '<div class="mk" role="dialog" aria-modal="true" aria-label="Export">' +
+      '<h3>Export</h3>' +
+      '<div class="row"><label>Format</label><select id="exFmt">' +
+        '<option value="png">PNG — lossless, transparency</option><option value="jpeg">JPEG — small, no transparency</option>' +
+        '<option value="webp">WebP — small + transparency</option>' + (AVIF_OK ? '<option value="avif">AVIF — smallest, modern browsers</option>' : '') +
+        '<option value="bmp">BMP — uncompressed bitmap</option><option value="ico">ICO — app/favicon icon</option>' +
+        '<option value="pdf">PDF — one or many pages</option><option value="psd">PSD — Photoshop, layers kept</option></select></div>' +
+      '<div class="row" id="exQRow"><label>Quality</label><input type="range" id="exQ" min="10" max="100" value="92"><span class="val" id="exQVal">92%</span></div>' +
+      '<div class="row" id="exTRow"><label>File size</label><label class="exchk"><input type="checkbox" id="exTOn"> Aim for</label><input type="number" id="exTKB" min="5" value="200"><span class="filesize">KB</span></div>' +
+      '<div class="row" id="exDRow"><label>Size px</label><input type="number" id="exW" min="1"><span class="filesize">×</span><input type="number" id="exH" min="1"><label class="exchk"><input type="checkbox" id="exLock" checked> keep ratio</label></div>' +
+      '<div class="row" id="exPRow"><label>Pages</label><button type="button" class="btn btn-ghost btn-sm" id="exPAdd">Add more images…</button><button type="button" class="btn btn-ghost btn-sm" id="exPClr" style="display:none;">Clear</button><span class="filesize" id="exPList">just this image</span><input type="file" id="exPFile" accept="image/*,.heic,.heif" multiple style="display:none;"></div>' +
+      '<span id="exInfo">…</span>' +
+      '<div class="exbtns"><button type="button" class="btn btn-ghost" id="exNo">Cancel</button><button type="button" class="btn btn-gold" id="exGo">Download</button></div>' +
+      '</div>';
+    document.body.appendChild(exEl);
+    var $e = function(i){ return document.getElementById(i); };
+    function ratio(){ return canvas.width/canvas.height; }
+    function sync(){ exShowRows(); exSchedule(); }
+    $e('exFmt').addEventListener('change', sync);
+    $e('exQ').addEventListener('input', function(){ $e('exQVal').textContent = this.value + '%'; exSchedule(); });
+    $e('exTOn').addEventListener('change', sync);
+    $e('exTKB').addEventListener('input', exSchedule);
+    $e('exW').addEventListener('input', function(){ if($e('exLock').checked) $e('exH').value = Math.max(1, Math.round(this.value/ratio())); exSchedule(); });
+    $e('exH').addEventListener('input', function(){ if($e('exLock').checked) $e('exW').value = Math.max(1, Math.round(this.value*ratio())); exSchedule(); });
+    $e('exPAdd').addEventListener('click', function(){ $e('exPFile').click(); });
+    $e('exPFile').addEventListener('change', function(){
+      Array.prototype.forEach.call(this.files, function(f){ exPdfExtras.push(f); }); this.value = ''; exPdfList(); exSchedule();
+    });
+    $e('exPClr').addEventListener('click', function(){ exPdfExtras = []; exPdfList(); exSchedule(); });
+    function done(v){ exEl.classList.remove('show'); exTok++; if(exResolve){ var r = exResolve; exResolve = null; r(v); } }
+    $e('exNo').addEventListener('click', function(){ done(null); });
+    exEl.addEventListener('mousedown', function(e){ if(e.target === exEl) done(null); });
+    document.addEventListener('keydown', function(e){ if(e.key === 'Escape' && exEl.classList.contains('show')) done(null); });
+    $e('exGo').addEventListener('click', function(){ done(exRead()); });
+  }
+  function exPdfList(){
+    var n = exPdfExtras.length;
+    document.getElementById('exPList').textContent = n ? (n + 1) + ' pages (this image + ' + n + ' more)' : 'just this image';
+    document.getElementById('exPClr').style.display = n ? '' : 'none';
+  }
+  function exShowRows(){
+    var f = document.getElementById('exFmt').value, lossy = (f === 'jpeg' || f === 'webp' || f === 'avif');
+    document.getElementById('exQRow').style.display = (lossy || f === 'pdf') ? 'flex' : 'none';
+    document.getElementById('exTRow').style.display = lossy ? 'flex' : 'none';
+    document.getElementById('exDRow').style.display = (f === 'ico' || f === 'psd') ? 'none' : 'flex';
+    document.getElementById('exPRow').style.display = (f === 'pdf') ? 'flex' : 'none';
+    var tOn = lossy && document.getElementById('exTOn').checked;
+    document.getElementById('exQRow').style.opacity = (lossy && tOn) ? '0.45' : '1';
+  }
+  function exRead(){
+    var $e = function(i){ return document.getElementById(i); }, f = $e('exFmt').value, lossy = (f === 'jpeg' || f === 'webp' || f === 'avif');
+    return { fmt: f, q: (parseInt($e('exQ').value, 10) || 92)/100, target: lossy && $e('exTOn').checked, targetKB: parseFloat($e('exTKB').value) || 200,
+             w: parseInt($e('exW').value, 10) || canvas.width, h: parseInt($e('exH').value, 10) || canvas.height };
+  }
+  function exSchedule(){
+    clearTimeout(exTimer);
+    document.getElementById('exInfo').textContent = 'Calculating size…';
+    exTimer = setTimeout(exUpdate, 260);
+  }
+  async function exUpdate(){
+    var tok = ++exTok, st = exRead(), info = document.getElementById('exInfo');
+    try{
+      var r = await encodeFor(st);
+      if(tok !== exTok) return;
+      var txt = fmtBytes(r.blob.size) + ' · ' + r.w + '×' + r.h + ' px' + (r.pages > 1 ? ' · ' + r.pages + ' pages' : '');
+      if(srcFileSize && r.pages === undefined && r.ext !== 'psd'){
+        var pct = Math.round((1 - r.blob.size/srcFileSize)*100);
+        txt += '\nOriginal file ' + fmtBytes(srcFileSize) + (pct >= 0 ? ' → ' + pct + '% smaller' : ' → ' + Math.abs(pct) + '% larger');
+      }
+      if(st.target && r.met === false) txt += '\nCannot reach ' + st.targetKB + ' KB — this is the smallest possible.';
+      else if(st.target && r.scaled) txt += '\nReduced to fit ' + st.targetKB + ' KB.';
+      info.style.whiteSpace = 'pre-line'; info.textContent = txt;
+    }catch(e){ if(tok === exTok) info.textContent = 'Could not estimate the size for this format.'; }
+  }
+  function openExportDialog(d){
+    buildExport();
+    var $e = function(i){ return document.getElementById(i); };
+    $e('exFmt').value = d.fmt; if($e('exFmt').value !== d.fmt) $e('exFmt').value = 'png';
+    $e('exQ').value = Math.round(d.q*100); $e('exQVal').textContent = Math.round(d.q*100) + '%';
+    $e('exTOn').checked = !!d.target; $e('exTKB').value = d.targetKB;
+    $e('exW').value = canvas.width; $e('exH').value = canvas.height; $e('exLock').checked = true;
+    exPdfExtras = []; exPdfList(); exShowRows();
+    exEl.classList.add('show');
+    exSchedule();
+    return new Promise(function(r){ exResolve = r; });
+  }
+
+  /* ---- Compress tab: live result size + hold-to-compare ---- */
+  function compressSettings(){
+    var fmt = document.getElementById('compressFormat').value;
+    if(fmt === 'avif' && !AVIF_OK) fmt = 'webp';
+    return { fmt: fmt, q: (document.getElementById('compressQ').value/100), target: document.getElementById('compressMode').value === 'target',
+             targetKB: parseFloat(document.getElementById('targetKB').value) || 200 };
+  }
+  var cmpTimer = 0, cmpTok = 0, cmpBlob = null;
+  function scheduleCompressLive(){
+    if(activeTool !== 'compress' || !originalImg) return;
+    clearTimeout(cmpTimer);
+    var el = document.getElementById('compressLive'); el.textContent = 'calculating…';
+    cmpTimer = setTimeout(async function(){
+      var tok = ++cmpTok, st = compressSettings();
+      try{
+        var r = await encodeFor({ fmt: st.fmt, q: st.q, target: st.target, targetKB: st.targetKB, w: canvas.width, h: canvas.height });
+        if(tok !== cmpTok) return;
+        cmpBlob = r.blob;
+        var t = (srcFileSize ? 'Before ' + fmtBytes(srcFileSize) + ' → ' : '') + 'After ' + fmtBytes(r.blob.size);
+        if(srcFileSize){ var pc = Math.round((1 - r.blob.size/srcFileSize)*100); t += pc >= 0 ? ' (' + pc + '% smaller)' : ' (' + Math.abs(pc) + '% larger)'; }
+        if(st.target && r.met === false) t += ' — target not reachable, this is the smallest';
+        else if(st.target && r.scaled) t += ' — reduced to ' + r.w + '×' + r.h + ' to fit';
+        el.textContent = t;
+      }catch(e){ if(tok === cmpTok) el.textContent = 'could not estimate'; }
+    }, 280);
+  }
+  window.__apicCompressLive = scheduleCompressLive;
+  ['compressFormat','compressMode','targetKB'].forEach(function(id){ document.getElementById(id).addEventListener('input', scheduleCompressLive); document.getElementById(id).addEventListener('change', scheduleCompressLive); });
+  document.getElementById('compressQ').addEventListener('input', scheduleCompressLive);
+  toolBtns.forEach(function(b){ b.addEventListener('click', function(){ if(b.dataset.tool === 'compress') setTimeout(scheduleCompressLive, 0); }); });
+  document.addEventListener('apic:loaded', function(){ setTimeout(scheduleCompressLive, 50); });
+  (function(){
+    var hold = document.getElementById('compressHold'), showing = false;
+    async function down(e){
+      e.preventDefault(); if(showing || !originalImg) return;
+      if(!cmpBlob){ return; }
+      showing = true;
+      try{
+        var bm = await createImageBitmap(cmpBlob);
+        if(showing){ ctx.save(); ctx.globalCompositeOperation = 'copy'; ctx.drawImage(bm, 0, 0, canvas.width, canvas.height); ctx.restore(); }
+      }catch(err){}
+    }
+    function up(){ if(!showing) return; showing = false; render(); }
+    hold.addEventListener('pointerdown', down);
+    ['pointerup','pointerleave','pointercancel'].forEach(function(ev){ hold.addEventListener(ev, up); });
+  })();
+
   exportBtn.addEventListener('click', async function(){
     if(!__pass) return;               // only runs when approved by the export gate above
     if(!originalImg) return;
+    if(window.__apicEnsureFull) window.__apicEnsureFull();
+    var st = await openExportDialog(exDefaults());
+    if(!st) return;
     exportBtn.disabled = true;
     var origText = exportBtn.textContent; exportBtn.textContent = 'Exporting…';
     try{
-      if(activeTool === 'convert'){
-        var fmt = document.getElementById('convertFormat').value;
-        if(fmt === 'png'){ download(await canvasToBlob(canvas,'image/png'), 'apic-export.png'); }
-        else if(fmt === 'jpeg'){ download(await canvasToBlob(flattenToWhite(canvas),'image/jpeg',0.92), 'apic-export.jpg'); }
-        else if(fmt === 'webp'){ download(await canvasToBlob(canvas,'image/webp',0.92), 'apic-export.webp'); }
-        else if(fmt === 'bmp'){ download(canvasToBMP(flattenToWhite(canvas)), 'apic-export.bmp'); }
-        else if(fmt === 'ico'){
-          var size = Math.min(256, Math.max(canvas.width, canvas.height));
-          var sq = document.createElement('canvas'); sq.width = size; sq.height = size;
-          sq.getContext('2d').drawImage(canvas, 0, 0, size, size);
-          var pngBuf = await (await canvasToBlob(sq,'image/png')).arrayBuffer();
-          download(pngToICO(pngBuf, size), 'apic-export.ico');
+      var r = await encodeFor(st);
+      if(st.target && r.met === false){
+        if(!confirm('Could not reach ' + st.targetKB + ' KB. The smallest result is ' + fmtBytes(r.blob.size) + ' (' + r.w + '×' + r.h + '). Download it anyway?')){
+          exportBtn.disabled = false; exportBtn.textContent = origText; return;
         }
-        else if(fmt === 'psd'){
-          if(!window.__apicLayers || !window.__apicLayers.psdBlob) throw new Error('PSD export is not available right now.');
-          download(await window.__apicLayers.psdBlob(), 'apic-export.psd');
-        }
-        else if(fmt === 'pdf'){
-          var flat = flattenToWhite(canvas);
-          var jpegBuf = await (await canvasToBlob(flat,'image/jpeg',0.92)).arrayBuffer();
-          download(jpegToPDF(jpegBuf, canvas.width, canvas.height), 'apic-export.pdf');
-        }
-      } else if(activeTool === 'compress'){
-        var mode = document.getElementById('compressMode').value;
-        if(mode === 'quality'){
-          var q = document.getElementById('compressQ').value/100;
-          download(await canvasToBlob(flattenToWhite(canvas), 'image/jpeg', q), 'apic-compressed.jpg');
-        } else {
-          var targetKB = parseFloat(document.getElementById('targetKB').value) || 200;
-          var result = await compressToTarget(flattenToWhite(canvas), targetKB*1024);
-          var actualKB = (result.blob.size/1024).toFixed(1);
-          if(!result.met){
-            // Even after downscaling we couldn't fit — never present this as a successful target-size export.
-            if(!confirm('Could not reach '+targetKB+' KB. The smallest result is '+actualKB+' KB ('+result.width+'×'+result.height+'). Download it anyway?')){
-              exportBtn.disabled = false; exportBtn.textContent = origText; return;
-            }
-          } else if(result.scaled){
-            alert('The target of '+targetKB+' KB could not be met at full size, so the image was reduced to '+result.width+'×'+result.height+'. Final size: '+actualKB+' KB.');
-          }
-          download(result.blob, 'apic-compressed.jpg');
-        }
-      } else {
-        download(await canvasToBlob(canvas, 'image/png'), 'apic-export.png');
       }
+      download(r.blob, (activeTool === 'compress' ? 'apic-compressed.' : 'apic-export.') + r.ext);
+      exSave(st);
+      try{ if(window.__apicRecentSave) window.__apicRecentSave(); }catch(e){}
     } catch(err){ console.error(err); alert('Export failed — try a different format.'); }
     exportBtn.disabled = false; exportBtn.textContent = origText;
   });
@@ -4638,7 +5322,7 @@
   function bgIsLowEnd(){ return deviceTier() !== 'desktop'; }
   (function initBgQuality(){
     var sel = document.getElementById('bgQuality');
-    if(sel) sel.value = bgIsLowEnd() ? 'lite' : 'max';
+    if(sel) sel.value = bgIsLowEnd() ? 'lite' : 'fast';
   })();
 
   // Clean downscale (halve repeatedly, then final step) — avoids aliasing on big photos.
@@ -4715,6 +5399,7 @@
         await bgCall({ type: 'load', tier: tier, buf: buf }, [buf]);
         bgLoadedTiers[tier] = true; return 'worker';
       } catch(e){
+        if(e && e.apicCancelled) throw e;
         console.warn('Worker model load failed, using main thread:', e);
         bgWorkerBroken = true; try{ if(bgWorker) bgWorker.terminate(); }catch(x){} bgWorker = null;
       }
@@ -4779,6 +5464,7 @@
       var W = canvas.width, H = canvas.height;
       // Snapshot current pixels (keeps any earlier transparency + current edits)
       var orig = ctx.getImageData(0, 0, W, H);
+      var bgBak = document.createElement('canvas'); bgBak.width = W; bgBak.height = H; bgBak.getContext('2d').drawImage(canvas, 0, 0);
       var flat = document.createElement('canvas'); flat.width = W; flat.height = H;
       var fctx = flat.getContext('2d'); fctx.fillStyle = '#ffffff'; fctx.fillRect(0, 0, W, H); fctx.drawImage(canvas, 0, 0);
 
@@ -4822,6 +5508,7 @@
             }
           }
         } catch(modelErr){
+          if(modelErr && modelErr.apicCancelled) throw modelErr;
           console.error('Remove BG model "' + tier + '" failed:', modelErr);
           delete window.__bgSessions[tier]; delete bgLoadedTiers[tier]; matte = null; zoom = null;
         }
@@ -4877,7 +5564,8 @@
       ctx.putImageData(new ImageData(resultPixels, W, H), 0, 0);
       hasAlpha = true;
       dropEl.classList.add('has-alpha');
-      bakeToOriginal(); // so later filter/edit tweaks build on this result, not the pristine source
+      bgSrcCanvas = bgBak;
+      bakeToOriginal(function(){ syncOverlay(); }); // so later filter/edit tweaks build on this result, not the pristine source
       statusEl.textContent = '✓ done — export as PNG or WebP to keep transparency';
     } catch(err){
       console.error('Remove BG failed:', err);
@@ -5822,15 +6510,25 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   /* The live-preview dock (Edit / Advanced / Layers) mirrors the photo — let it include the layers too. */
   window.__apicLayers = {
     draw: function(c, k){ if(busy || baked) return; drawLayers(c, k); },
-    count: function(){ return L.length; }
+    count: function(){ return L.length; },
+    snapshot: function(){
+      var sg = JSON.stringify(L, function(k, v){ return (v && typeof v === 'object' && (v instanceof HTMLCanvasElement || (typeof ImageBitmap !== 'undefined' && v instanceof ImageBitmap) || v instanceof ImageData)) ? undefined : v; });
+      return { l: L.map(clone), sel: sel, sig: sg };
+    },
+    restore: function(sn){
+      L = sn && sn.l ? sn.l.map(clone) : []; sel = (sn && sn.sel && byId(sn.sel)) ? sn.sel : null;
+      H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh();
+    },
+    btns: function(){ btns(); }
   };
 
   /* ---------- history (layers only; the photo keeps APIC's own undo: 40 desktop / 10 mobile / 5 low-tier snapshots; this layer history is a separate 60-snapshot stack) ---------- */
   function pushHist(){
     H = H.slice(0, hi+1); H.push({l:L.map(clone), sel:sel}); if(H.length > 60) H.shift(); hi = H.length-1; btns();
+    try{ if(window.__apicCommit) window.__apicCommit(); }catch(e){}    // layer edits are steps in the one shared undo history
   }
   function goHist(i){ if(i<0 || i>=H.length) return; hi = i; L = H[i].l.map(clone); sel = byId(H[i].sel) ? H[i].sel : null; refresh(); }
-  function btns(){ $('lyUndo').disabled = hi<=0; $('lyRedo').disabled = hi>=H.length-1; $('lyFlat').disabled = busy || !anyVisible(); }
+  function btns(){ $('lyUndo').disabled = !(window.__apicCanUndo && window.__apicCanUndo()); $('lyRedo').disabled = !(window.__apicCanRedo && window.__apicCanRedo()); $('lyFlat').disabled = busy || !anyVisible(); }
 
   /* ---------- compose / paint ---------- */
   function place(){ var s = stage.style; s.left = cv.offsetLeft+'px'; s.top = cv.offsetTop+'px'; s.width = cv.clientWidth+'px'; s.height = cv.clientHeight+'px'; }
@@ -6002,25 +6700,28 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     drawLayer(g, b, true); drawLayer(g, a);
     var n = newLayer(b.name, 'image', m); n.blend = b.blend; L.splice(i-1, 2, n); sel = n.id;
   });
-  $('lyUndo').addEventListener('click', function(){ goHist(hi-1); });
-  $('lyRedo').addEventListener('click', function(){ goHist(hi+1); });
+  $('lyUndo').addEventListener('click', function(){ if(window.__apicUndo) window.__apicUndo(); });
+  $('lyRedo').addEventListener('click', function(){ if(window.__apicRedo) window.__apicRedo(); });
 
   /* Flatten: bake every visible layer into the photo itself (so Remove BG / Remove Object / Advanced all see them). */
   $('lyFlat').addEventListener('click', function(){
     if(busy || !anyVisible()) return;
     if(typeof window.__apicBake !== 'function'){ alert('Flatten is not available right now.'); return; }
-    if(!confirm('Flatten merges every visible layer into the photo for good (hidden layers are dropped).\n\nYou can undo it with the ↺ button in the title bar, but that restores the photo only — layers would have to be re-added.\n\nContinue?')) return;
+    if(!confirm('Flatten merges every visible layer into the photo (hidden layers are dropped).\n\nYou can undo it with Undo — your layers come back too.\n\nContinue?')) return;
+    try{ if(window.__apicCommit) window.__apicCommit(); }catch(e){}    // make sure the pre-flatten state (with its layers) is a history step
     var g = cv.getContext('2d'), before = null, done = false, failed = false;
     try{ before = g.getImageData(0, 0, cv.width, cv.height); }catch(e){ alert('Could not flatten this image.'); return; }
     function undoDraw(){ try{ g.putImageData(before, 0, 0); }catch(e){} busy = false; refresh(); }
     busy = true; btns(); drawLayers(g);
     var guardT = setTimeout(function(){ if(!done){ failed = true; undoDraw(); } }, 30000);
     try{
+      window.__apicFlattening = true;
       window.__apicBake(function(){
+        window.__apicFlattening = false;
         if(failed) return; done = true; clearTimeout(guardT);
         busy = false; L = []; sel = null; H = [{l:[], sel:null}]; hi = 0; refresh();
       });
-    }catch(e){ clearTimeout(guardT); failed = true; undoDraw(); }
+    }catch(e){ window.__apicFlattening = false; clearTimeout(guardT); failed = true; undoDraw(); }
   });
 
   /* ---------- pointer interaction on the canvas ---------- */
@@ -6110,7 +6811,8 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     var mod = e.ctrlKey || e.metaKey, key = e.key, l = cur();
     if(mod && (key==='z' || key==='Z' || key==='y' || key==='Y')){
       var redo = key==='y' || key==='Y' || e.shiftKey;
-      if(redo ? hi < H.length-1 : hi > 0){ e.preventDefault(); e.stopImmediatePropagation(); goHist(hi + (redo ? 1 : -1)); }
+      e.preventDefault(); e.stopImmediatePropagation();
+      if(redo){ if(window.__apicRedo) window.__apicRedo(); } else if(window.__apicUndo) window.__apicUndo();
       return;
     }
     if(key === 'Escape' && sel){ sel = null; refresh(); return; }
@@ -6244,6 +6946,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   function adopt(specs){
     L = []; specs.forEach(function(sp){ var l = newLayer(sp.name, 'image', sp.canvas); l.x = sp.x; l.y = sp.y; l.s = sp.s; l.op = sp.op; l.blend = sp.blend; l.vis = sp.vis; L.push(l); });
     sel = L.length ? L[L.length-1].id : null; H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh();
+    try{ if(window.__apicCommit) window.__apicCommit(); }catch(e){}
   }
   window.__apicLayers.adopt = adopt;
   async function openPSD(file){
@@ -6365,6 +7068,8 @@ COSTS AT SMALL SCALE: $0 across all of the above.
         <ul>
           <li><b>apic_user</b>: keeps you signed in on this device (your name, email and photo). Removed when you sign out.</li>
           <li><b>apic_notice_ok</b>: remembers that you closed the notice about this.</li>
+          <li><b>apic_prefs_v1</b> and <b>apic_export_v1</b>: remember your tool settings (for example formats, quality and brush sizes) on this device.</li>
+          <li>A small <b>recent work</b> list (up to 6 downsized copies of images you edited) is kept in your browser's IndexedDB on this device only, so you can reopen them next visit. Use "Clear" in the Recent work row to delete it.</li>
           <li>Google and Firebase may store their own identifiers so sign-in works securely.</li>
           <li>Your browser may cache the AI model files so they do not download again.</li>
         </ul>
@@ -11591,6 +12296,134 @@ html:not([lang="en"]) body *{letter-spacing:normal!important}
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(init, 0); }); else setTimeout(init, 0);
 })();
 
+</script>
+
+<script>
+/* ====== APIC: remembered settings, recent work, Batch shortcut, per-task URLs ====== */
+(function(){
+  var $ = function(i){ return document.getElementById(i); };
+
+  /* ---- remember tool settings between visits (local only) ---- */
+  var PKEY = 'apic_prefs_v1';
+  var IDS = ['convertFormat','compressMode','compressQ','targetKB','compressFormat','orBrush','orQuality','bgQuality','bgBrushMode','bgBrushSize','regionMode','regionAmt'];
+  function pload(){ try{ return JSON.parse(localStorage.getItem(PKEY) || '{}') || {}; }catch(e){ return {}; } }
+  function restorePrefs(){
+    var d = pload();
+    IDS.forEach(function(id){
+      var el = $(id); if(!el || d[id] === undefined) return;
+      if(el.tagName === 'SELECT'){ var ok = Array.prototype.some.call(el.options, function(o){ return o.value === d[id]; }); if(!ok) return; }
+      if(el.value === d[id]) return;
+      el.value = d[id];
+      el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true}));
+    });
+  }
+  function savePref(e){
+    var t = e.target; if(!t || IDS.indexOf(t.id) < 0) return;
+    var d = pload(); d[t.id] = t.value;
+    try{ localStorage.setItem(PKEY, JSON.stringify(d)); }catch(err){}
+  }
+  document.addEventListener('change', savePref, true);
+  document.addEventListener('input', savePref, true);
+  window.addEventListener('load', function(){ setTimeout(restorePrefs, 350); });
+
+  /* ---- recent work (IndexedDB, up to 6 downsized copies) ---- */
+  var DBN = 'apic-recent', ST = 'items', MAXR = 6, sid = null, saveT = 0;
+  function db(){
+    return new Promise(function(res, rej){
+      if(!window.indexedDB){ rej(new Error('no idb')); return; }
+      var rq = indexedDB.open(DBN, 1);
+      rq.onupgradeneeded = function(){ rq.result.createObjectStore(ST, {keyPath:'id'}); };
+      rq.onsuccess = function(){ res(rq.result); }; rq.onerror = function(){ rej(rq.error); };
+    });
+  }
+  function tx(mode, fn){
+    return db().then(function(d){ return new Promise(function(res, rej){
+      var t = d.transaction(ST, mode), os = t.objectStore(ST), out = fn(os);
+      t.oncomplete = function(){ res(out && out.result !== undefined ? out.result : undefined); d.close(); };
+      t.onerror = t.onabort = function(){ rej(t.error); d.close(); };
+    }); });
+  }
+  function nameNow(){ var fi = $('fileInfo'); var t = fi ? fi.textContent : ''; var m = t.split(' · ')[0]; return (m && m !== 'No image loaded') ? m.slice(0, 40) : 'Photo'; }
+  function saveRecent(){
+    var cv = $('canvas'); if(!cv || !sid || cv.style.display === 'none' || cv.width < 2) return;
+    var k = Math.min(1, 1600/Math.max(cv.width, cv.height)), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(cv.width*k)); c.height = Math.max(1, Math.round(cv.height*k));
+    c.getContext('2d').drawImage(cv, 0, 0, c.width, c.height);
+    var alpha = $('drop') && $('drop').classList.contains('has-alpha'), mine = sid, nm = nameNow();
+    c.toBlob(function(b){
+      if(!b) return;
+      tx('readwrite', function(os){ os.put({id: mine, name: nm, ts: Date.now(), blob: b, type: b.type}); return null; })
+        .then(function(){ return tx('readwrite', function(os){ return os.getAll(); }); })
+        .then(function(all){
+          all = (all || []).sort(function(a, b2){ return b2.ts - a.ts; });
+          if(all.length > MAXR) return tx('readwrite', function(os){ all.slice(MAXR).forEach(function(x){ os.delete(x.id); }); return null; });
+        }).catch(function(){});
+    }, alpha ? 'image/png' : 'image/jpeg', 0.86);
+  }
+  window.__apicRecentSave = saveRecent;
+  function debouncedSave(){ clearTimeout(saveT); saveT = setTimeout(saveRecent, 2500); }
+  document.addEventListener('apic:loaded', function(){ sid = 'r' + Date.now() + Math.random().toString(36).slice(2, 6); debouncedSave(); });
+  document.addEventListener('apic:committed', debouncedSave);
+  document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'hidden' && sid){ clearTimeout(saveT); saveRecent(); } });
+  var urls = [];
+  function renderRecent(){
+    var sec = $('recentSec'), list = $('rcList'); if(!sec || !list) return;
+    tx('readonly', function(os){ return os.getAll(); }).then(function(all){
+      urls.forEach(function(u){ URL.revokeObjectURL(u); }); urls = [];
+      all = (all || []).sort(function(a, b){ return b.ts - a.ts; });
+      list.textContent = '';
+      all.forEach(function(it){
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'rc-item'; b.title = 'Reopen ' + it.name;
+        var im = document.createElement('img'), u = URL.createObjectURL(it.blob); urls.push(u); im.src = u; im.alt = '';
+        var sp = document.createElement('span'); sp.textContent = it.name;
+        b.appendChild(im); b.appendChild(sp);
+        b.addEventListener('click', function(){
+          var ext = it.type === 'image/png' ? '.png' : '.jpg', base = it.name.replace(/\.[a-z0-9]+$/i, '');
+          var f = new File([it.blob], base + ext, {type: it.type});
+          var fi = $('fileInput'); if(!fi) return;
+          try{ var dt = new DataTransfer(); dt.items.add(f); fi.files = dt.files; fi.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
+          var st = $('drop'); if(st && st.scrollIntoView) st.scrollIntoView({block:'center', behavior:'smooth'});
+        });
+        list.appendChild(b);
+      });
+      sec.classList.toggle('show', all.length > 0 && !document.querySelector('.studio.has-image'));
+    }).catch(function(){});
+  }
+  $('rcClear').addEventListener('click', function(){ tx('readwrite', function(os){ os.clear(); return null; }).then(renderRecent).catch(function(){}); });
+  window.addEventListener('load', function(){ setTimeout(renderRecent, 400); });
+  document.addEventListener('click', function(e){ if(e.target && e.target.id === 'removeImgBtn') setTimeout(renderRecent, 300); });
+  document.addEventListener('apic:loaded', function(){ var sec = $('recentSec'); if(sec) sec.classList.remove('show'); });
+
+  /* ---- Batch studio shortcut (nav link, #batch, /batch) ---- */
+  function openBatch(){
+    var box = $('bxBox'); if(!box) return;
+    box.open = true;
+    var sec = $('batchSec'); if(sec && sec.scrollIntoView) sec.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  var nb = $('navBatch'); if(nb) nb.addEventListener('click', function(e){ e.preventDefault(); openBatch(); });
+  if(location.hash === '#batch') window.addEventListener('load', function(){ setTimeout(openBatch, 300); });
+
+  /* ---- per-task URLs: /compress, /remove-background, ... open the same app with that tool ready ---- */
+  var ROUTES = {
+    'edit':'edit','advanced':'advanced','remove-object':'objremove','resize':'resize','convert':'convert','compress':'compress',
+    'remove-background':'bgremove','ai-tools':'ai','layers':'layersTab','social':'socialTab','visual-intelligence':'preflightTab'
+  };
+  var seg = (location.pathname.replace(/\/index\.html$/i, '').replace(/\/+$/, '').split('/').pop() || '').toLowerCase();
+  var q = (new URLSearchParams(location.search).get('tool') || '').toLowerCase();
+  var want = ROUTES[seg] || ROUTES[q] || null, isBatch = (seg === 'batch' || q === 'batch'), isDesign = (seg === 'design' || q === 'design');
+  if(isBatch) window.addEventListener('load', function(){ setTimeout(openBatch, 400); });
+  if(isDesign) window.addEventListener('load', function(){ setTimeout(function(){ var d = $('dsOpenTop') || $('dsOpenHero'); if(d) d.click(); }, 600); });
+  if(want){
+    var tried = false;
+    document.addEventListener('apic:loaded', function(){
+      if(tried) return; tried = true;
+      setTimeout(function(){
+        var btn = /Tab$/.test(want) ? $(want) : document.querySelector('.tool-btn[data-tool="' + want + '"]');
+        if(btn){ btn.disabled = false; btn.click(); }
+      }, 700);
+    });
+  }
+})();
 </script>
 </body>
 </html>

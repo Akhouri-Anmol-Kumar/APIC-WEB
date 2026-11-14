@@ -10,7 +10,7 @@ TODAY = datetime.date.today().isoformat()
 # slug: (title, meta description, h1, eyebrow, h2, lead, [3 steps])
 P = {
  'remove-background': ('Remove Image Background Free — On-Device AI, No Upload | APIC',
-   'Free remove.bg alternative and best free background remover: remove image backgrounds in your browser with on-device AI. No upload, no signup. Brush touch-up and new background.',
+   'Remove image backgrounds free in your browser with on-device AI. No upload, no signup. Brush touch-up and new background.',
    'Remove Image Background Free With On-Device AI',
    'Remove background', 'Remove an image background without uploading it.',
    'APIC cuts the background out of a photo with AI that runs inside your browser. Your image never leaves your device and there is no per-image credit.',

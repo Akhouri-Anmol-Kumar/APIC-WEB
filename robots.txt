@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://apic-online.vercel.app/sitemap.xml

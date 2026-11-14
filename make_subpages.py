@@ -9,11 +9,11 @@ BASE = 'https://apic-online.vercel.app/'
 TODAY = datetime.date.today().isoformat()
 # slug: (title, meta description, h1, eyebrow, h2, lead, [3 steps])
 P = {
- 'remove-background': ('Free remove.bg Alternative: Remove Image Background, No Upload | APIC',
-   'Remove image backgrounds free in your browser with on-device AI. No upload, no sign-up, no credits. Brush touch-up and one-click new background. A remove.bg alternative.',
-   'Remove Image Background Free — remove.bg Alternative With No Upload',
-   'Remove background', 'Remove an image background free, without uploading it.',
-   'APIC cuts the background out of a photo with AI that runs inside your browser. Your image never leaves your device, there is no account and no per-image credit. It is a free alternative to remove.bg, whose standalone site and API are closing on 1 December 2026.',
+ 'remove-background': ('Remove Image Background Free — On-Device AI, No Upload | APIC',
+   'Remove image backgrounds free in your browser with on-device AI. No upload, no sign-up. Brush touch-up and one-click new background.',
+   'Remove Image Background Free With On-Device AI',
+   'Remove background', 'Remove an image background without uploading it.',
+   'APIC cuts the background out of a photo with AI that runs inside your browser. Your image never leaves your device and there is no per-image credit.',
    ['Drop in a JPG, PNG, WebP or HEIC photo.','Open the Remove BG tab and press Remove.','Touch up with the Restore or Erase brush, pick a new background if you like, then export a transparent PNG.']),
  'compress': ('Compress Image to Exact File Size Online — No Upload | APIC',
    'Compress JPEG, WebP and AVIF to a target size in KB, with a live before and after size preview. Free, in your browser, nothing uploaded.',
@@ -90,8 +90,6 @@ P = {
 }
 LINKS = [('remove-background','Remove background'),('compress','Compress image'),('resize','Resize image'),('convert','Convert image · HEIC to JPG'),('edit','Edit photo'),('advanced','Advanced colour tools'),('remove-object','Remove objects'),('ai-tools','AI tools'),('layers','Layers &amp; PSD'),('social','Social media sizes'),('visual-intelligence','Image preflight check'),('batch','Batch processing'),('design','Design Studio')]
 src = open('index.html', encoding='utf-8').read()
-m = re.search(r'<!--SEO-ABOUT-->.*?<!--/SEO-ABOUT-->', src, re.S)
-table = re.search(r'<div class="cmp-wrap reveal">.*?</table>\s*</div>', m.group(0), re.S).group(0)
 esc = lambda t: html.escape(t, quote=False)
 def attr(t): return html.escape(t, quote=True)
 
@@ -100,7 +98,6 @@ def region(slug):
     nav = ''.join('<a href="../%s/">%s</a>' % (k, v) for k, v in LINKS if k != slug)
     return ('<!--SEO-ABOUT-->\n  <section class="features seo-about" id="alternative">\n    <div class="wrap">\n      <div class="section-head">\n'
       '        <div class="eyebrow">%s</div>\n        <h2>%s</h2>\n        <p>%s</p>\n      </div>\n' % (esc(eyebrow), esc(h2), esc(lead))
-      + ('      %s\n' % table if slug == 'remove-background' else '')
       + '      <h3 class="seo-h3">How it works</h3>\n      <ol class="seo-steps">\n' + ''.join('        <li>%s</li>\n' % esc(x) for x in steps) + '      </ol>\n'
       '      <h3 class="seo-h3">More APIC tools</h3>\n      <nav class="seo-links" aria-label="APIC tools"><a href="../">APIC home</a>' + nav + '</nav>\n    </div>\n  </section>\n  <!--/SEO-ABOUT-->')
 
@@ -115,7 +112,7 @@ for slug, (title, desc, h1, *_rest) in P.items():
     for key in ('property="og:title"', 'name="twitter:title"'):
         h = re.sub(r'(<meta %s content=")[^"]*(")' % key, lambda mm: mm.group(1) + attr(title) + mm.group(2), h, count=1)
     h = re.sub(r'(<h1 style="[^"]*">)[^<]*(</h1>)', lambda mm: mm.group(1) + esc(h1) + mm.group(2), h, count=1)
-    h = re.sub(r'<!--SEO-ABOUT-->.*?<!--/SEO-ABOUT-->', lambda mm: region(slug), h, count=1, flags=re.S)
+    h = h.replace('<!-- FAQ -->', region(slug) + '\n  <!-- FAQ -->', 1)
     crumbs = {'@context': 'https://schema.org', '@type': 'BreadcrumbList', 'itemListElement': [
         {'@type': 'ListItem', 'position': 1, 'name': 'APIC', 'item': BASE},
         {'@type': 'ListItem', 'position': 2, 'name': P[slug][3], 'item': url}]}

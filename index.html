@@ -2790,6 +2790,8 @@
     } else if(activeTool === 'bgremove'){
       bgPainting = true; bgLast = null; bgDab(p);
     } else if(activeTool === 'edit'){
+      if(!e.touches && e.button > 0) return;                       // right-click must not start a crop
+      var ae = document.activeElement; if(ae && ae !== document.body && /BUTTON|SELECT|INPUT/.test(ae.tagName)) ae.blur();   // so Enter / Esc act on the crop box
       cropBegin(p, !!e.touches); redrawOverlay();
     } else if(activeTool === 'advanced'){
       if(view.z > 1){ var c2 = clientXY(e); panDrag = {x: c2.x, y: c2.y}; overlay.style.cursor = 'grabbing'; }   // zoomed in: a plain drag pans the photo
@@ -2869,7 +2871,7 @@
   (function(){
     var tog = document.getElementById('selToggle'), ratio = document.getElementById('cropRatio');
     function setSel(v){ editSelecting = v; tog.textContent = v ? 'Done selecting' : 'Select area'; syncOverlay(); }
-    tog.addEventListener('click', function(){ setSel(!editSelecting); });
+    tog.addEventListener('click', function(){ setSel(!editSelecting); if(editSelecting) tog.blur(); });
     ratio.addEventListener('change', function(){
       var r = parseFloat(ratio.value);
       if(r < 0) return;
@@ -2879,6 +2881,7 @@
         cropRect = { x: (canvas.width - w)/2, y: (canvas.height - h)/2, w: w, h: h };
       }
       redrawOverlay();
+      ratio.blur();
     });
     document.getElementById('cropClearE').addEventListener('click', function(){ cropRect = null; redrawOverlay(); });
     document.getElementById('cropApplyE').addEventListener('click', function(){
@@ -2948,6 +2951,7 @@
   overlay.addEventListener('mouseleave', function(e){ if(cropDrag) return; pointerUp(e); });   // a crop drag keeps going outside the photo
   window.addEventListener('mousemove', function(e){ if(cropDrag && e.target !== overlay) pointerMove(e); });
   window.addEventListener('mouseup', function(e){ if(cropDrag) pointerUp(e); });
+  window.addEventListener('blur', function(){ if(cropDrag) pointerUp(); });
   // overlay sits inside the <label> that opens the file picker on click —
   // stop that default so painting/cropping doesn't also pop the file dialog.
   overlay.addEventListener('click', function(e){ if(overlay.classList.contains('active')){ e.preventDefault(); e.stopPropagation(); } });

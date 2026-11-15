@@ -2871,6 +2871,8 @@
   (function(){
     var tog = document.getElementById('selToggle'), ratio = document.getElementById('cropRatio');
     function setSel(v){ editSelecting = v; tog.textContent = v ? 'Done selecting' : 'Select area'; syncOverlay(); }
+    window.__apicSetSel = setSel;
+    document.addEventListener('apic:loaded', function(){ ratio.value = '-1'; });   // a new photo starts with no shape chosen (browsers can keep the old <select> value)
     tog.addEventListener('click', function(){ setSel(!editSelecting); if(editSelecting) tog.blur(); });
     ratio.addEventListener('change', function(){
       var r = parseFloat(ratio.value);
@@ -2955,6 +2957,24 @@
   // overlay sits inside the <label> that opens the file picker on click —
   // stop that default so painting/cropping doesn't also pop the file dialog.
   overlay.addEventListener('click', function(e){ if(overlay.classList.contains('active')){ e.preventDefault(); e.stopPropagation(); } });
+  // The overlay lives inside the <label> that opens the file picker. If a drag starts on the overlay but the button is
+  // released anywhere else (past the photo's edge, over the zoom bar, on a handle at the border), the browser sends the
+  // click to the label instead and the picker pops up. Block that for as long as a tool is drawing on the photo,
+  // and for a moment after a gesture ends.
+  var gestureEndedAt = 0;
+  // Edit tool: pressing on the photo with the mouse simply starts a crop box, so no extra button press is needed
+  // (and a click on the photo can never fall through to the file picker).
+  dropEl.addEventListener('mousedown', function(e){
+    if(!originalImg || activeTool !== 'edit' || editSelecting || e.button > 0 || e.target !== canvas) return;
+    if(window.__apicSetSel){ window.__apicSetSel(true); pointerDown(e); }
+  }, true);
+  ['mouseup','touchend'].forEach(function(ev){ window.addEventListener(ev, function(){ if(cropDrag || painting || bgPainting || panDrag) gestureEndedAt = Date.now(); }, true); });
+  dropEl.addEventListener('click', function(e){
+    if(!originalImg) return;
+    if(overlay.classList.contains('active') || activeTool === 'edit' || Date.now() - gestureEndedAt < 500){
+      e.preventDefault();      // cancels the label's "open file picker" default; other click handlers still run
+    }
+  }, true);
 
   // Brush size: the slider itself always drove the real paint size (paintDab
   // reads orBrush.value fresh on every dab), but nothing ever updated the
@@ -2987,6 +3007,7 @@
       originalImg = snap;
       resetAdjustmentState();
       cropRect = null;
+      try{ if(window.__apicLayers && window.__apicLayers.shift) window.__apicLayers.shift(-cx, -cy); }catch(err){}   // stickers / text keep their place on the photo
       render(); syncOverlay();
       fileInfo.textContent = snap.naturalWidth + '×' + snap.naturalHeight + ' (cropped)';
       commitHistory();
@@ -6722,7 +6743,8 @@ COSTS AT SMALL SCALE: $0 across all of the above.
       L = sn && sn.l ? sn.l.map(clone) : []; sel = (sn && sn.sel && byId(sn.sel)) ? sn.sel : null;
       H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh();
     },
-    btns: function(){ btns(); }
+    btns: function(){ btns(); },
+    shift: function(dx, dy){ if(!L.length) return; L.forEach(function(l){ l.x += dx; l.y += dy; }); H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh(); }
   };
 
   /* ---------- history (layers only; the photo keeps APIC's own undo: 40 desktop / 10 mobile / 5 low-tier snapshots; this layer history is a separate 60-snapshot stack) ---------- */

@@ -2625,6 +2625,25 @@
   var painting = false, cropping = false, cropStart = null;
   var maskBox = null; // bounds of painted pixels {x0,y0,x1,y1} in canvas px — lets object removal touch only that region
 
+  /* The overlay is positioned over the photo from the photo's own offsets. Those change whenever the layout moves
+     (the page re-centres, a scrollbar appears, the floating preview docks, the studio resizes), which left the crop box
+     drawn beside the photo and clicks near its edge missing the overlay. So while a tool is drawing on the photo,
+     the overlay is re-aligned every frame (a handful of cheap reads) and on every press. */
+  function alignOverlay(){
+    if(overlay.style.display === 'none' || !canvas.clientWidth) return;
+    var l = canvas.offsetLeft + 'px', t = canvas.offsetTop + 'px', w = canvas.clientWidth + 'px', h = canvas.clientHeight + 'px';
+    if(overlay.style.left !== l) overlay.style.left = l;
+    if(overlay.style.top !== t) overlay.style.top = t;
+    if(overlay.style.width !== w) overlay.style.width = w;
+    if(overlay.style.height !== h) overlay.style.height = h;
+  }
+  var alignRaf = 0;
+  function alignLoop(){
+    alignRaf = 0;
+    if(!overlay.classList.contains('active') || overlay.style.display === 'none') return;
+    alignOverlay();
+    alignRaf = requestAnimationFrame(alignLoop);
+  }
   function syncOverlay(){
     if(!originalImg){ overlay.style.display = 'none'; return; }
     overlay.width = canvas.width; overlay.height = canvas.height;
@@ -2637,11 +2656,12 @@
     var showOverlay = (activeTool === 'objremove' || activeTool === 'advanced' || (activeTool === 'edit' && editSelecting) || (activeTool === 'bgremove' && bgTouchReady()));
     overlay.style.display = showOverlay ? 'block' : 'none';
     overlay.classList.toggle('active', showOverlay);
+    if(showOverlay && !alignRaf) alignRaf = requestAnimationFrame(alignLoop);
     if(overlay.width + 'x' + overlay.height !== viewSize){ viewSize = overlay.width + 'x' + overlay.height; viewReset(); }
     updateBgTouch(); updateZoomBar();
     redrawOverlay();
   }
-  window.addEventListener('resize', function(){ if(overlay.style.display !== 'none'){ overlay.style.left = canvas.offsetLeft+'px'; overlay.style.top = canvas.offsetTop+'px'; overlay.style.width = canvas.clientWidth+'px'; overlay.style.height = canvas.clientHeight+'px'; } });
+  window.addEventListener('resize', alignOverlay);
 
   function redrawOverlay(){
     octx.clearRect(0,0,overlay.width,overlay.height);
@@ -2781,6 +2801,7 @@
 
   function pointerDown(e){
     if(!originalImg) return;
+    alignOverlay();
     e.preventDefault();
     if(e.touches && e.touches.length >= 2){ startGesture(e); return; }
     if(handMode || spaceDown || e.button === 1){ var c0 = clientXY(e); panDrag = {x: c0.x, y: c0.y}; overlay.style.cursor = 'grabbing'; return; }
@@ -2965,8 +2986,9 @@
   // Edit tool: pressing on the photo with the mouse simply starts a crop box, so no extra button press is needed
   // (and a click on the photo can never fall through to the file picker).
   dropEl.addEventListener('mousedown', function(e){
-    if(!originalImg || activeTool !== 'edit' || editSelecting || e.button > 0 || e.target !== canvas) return;
-    if(window.__apicSetSel){ window.__apicSetSel(true); pointerDown(e); }
+    if(!originalImg || e.button > 0 || e.target !== canvas) return;
+    if(activeTool === 'edit' && !editSelecting){ if(window.__apicSetSel){ window.__apicSetSel(true); pointerDown(e); } return; }
+    if(overlay.classList.contains('active')){ alignOverlay(); pointerDown(e); }   // the overlay had drifted off the photo
   }, true);
   ['mouseup','touchend'].forEach(function(ev){ window.addEventListener(ev, function(){ if(cropDrag || painting || bgPainting || panDrag) gestureEndedAt = Date.now(); }, true); });
   dropEl.addEventListener('click', function(e){

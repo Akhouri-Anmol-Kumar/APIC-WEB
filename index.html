@@ -1440,6 +1440,7 @@
             <input type="range" id="regionAmt" min="1" max="100" value="60">
             <button class="btn btn-ghost btn-sm" id="regionApply">Apply</button></div>
           <p class="hint" style="margin-top:6px;">Crop and Hide area both use the selection: tap Select area (or pick a crop shape), then drag on the photo. Hide area blurs or pixelates faces, plates or text.</p>
+          <p class="hint" id="cropTips" style="margin-top:0;">Crop box: drag its edges or corners to resize, drag inside to move it, click outside to deselect. Enter applies the crop, Esc clears it. The thirds grid helps you compose.</p>
           <button class="btn btn-ghost btn-sm" id="resetEdit">Reset all</button>
         </div>
 
@@ -1480,11 +1481,6 @@
           <details class="adv-sec"><summary>Detail</summary><div class="adv-body" id="advSecDetail"></div></details>
 
           <details class="adv-sec"><summary>Effects</summary><div class="adv-body" id="advSecFx"></div></details>
-
-          <details class="adv-sec"><summary>Crop</summary><div class="adv-body">
-            <p class="hint" style="margin-top:0;">Drag directly on the image above to draw a selection, then apply.</p>
-            <div class="row"><button class="btn btn-ghost btn-sm" id="applyCrop" style="flex:1;">Apply crop</button><button class="btn btn-ghost btn-sm" id="clearCrop" style="flex:1;">Clear selection</button></div>
-          </div></details>
 
           <details class="adv-sec"><summary>Export grade</summary><div class="adv-body">
             <div class="row"><button class="btn btn-ghost btn-sm" id="advExportLut" style="flex:1;">Download .cube LUT</button></div>
@@ -2557,7 +2553,7 @@
   var maskCanvas = document.createElement('canvas'); // full-res binary mask for inpaint, 255=paint
   var mctx = maskCanvas.getContext('2d');
   var cropRect = null; // {x,y,w,h} in canvas pixel space
-  var editSelecting = false, cropMoving = null, bgPainting = false, bgLast = null, viewSize = '';
+  var editSelecting = false, cropMoving = null, cropDrag = null, bgPainting = false, bgLast = null, viewSize = '';
   function bgTouchReady(){ return !!(bgSrcCanvas && originalImg && bgSrcCanvas.width === canvas.width && bgSrcCanvas.height === canvas.height); }
   function cropRatioVal(){ var el = document.getElementById('cropRatio'); var r = el ? parseFloat(el.value) : 0; return (activeTool === 'edit' && r > 0) ? r : 0; }
 
@@ -2600,7 +2596,7 @@
     zoomBar.classList.toggle('show', zoomable());
     document.getElementById('zoomPct').textContent = Math.round(view.z*100) + '%';
     zoomBar.querySelector('[data-z=hand]').classList.toggle('on', handMode);
-    overlay.style.cursor = handMode ? 'grab' : '';
+    overlay.style.cursor = handMode ? 'grab' : (activeTool === 'advanced' ? (view.z > 1 ? 'grab' : 'default') : '');
   }
   overlay.addEventListener('wheel', function(e){
     if(!zoomable() || !(e.ctrlKey || e.metaKey)) return;
@@ -2614,7 +2610,7 @@
   window.addEventListener('keyup', function(e){ if(e.code === 'Space') spaceDown = false; });
   function clientXY(e){ var t = e.touches ? e.touches[0] : e; return {x: t.clientX, y: t.clientY}; }
   function startGesture(e){
-    e.preventDefault(); painting = false; cropping = false; cropMoving = null; bgPainting = false; panDrag = null;
+    e.preventDefault(); painting = false; cropping = false; cropMoving = null; cropDrag = null; bgPainting = false; panDrag = null;
     var a = e.touches[0], b = e.touches[1];
     gest = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1, cx: (a.clientX + b.clientX)/2, cy: (a.clientY + b.clientY)/2 };
   }
@@ -2653,14 +2649,125 @@
       octx.save(); octx.globalAlpha = 0.65;
       octx.drawImage(maskCanvas, 0, 0);
       octx.restore();
-    } else if((activeTool === 'advanced' || (activeTool === 'edit' && editSelecting)) && cropRect){
-      octx.save();
-      octx.fillStyle = 'rgba(0,0,0,0.55)';
-      octx.fillRect(0,0,overlay.width,overlay.height);
-      octx.clearRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
-      octx.strokeStyle = '#39ff9d'; octx.lineWidth = 2;
-      octx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
-      octx.restore();
+    } else if(activeTool === 'edit' && editSelecting && cropRect){
+      drawCropBox();
+    }
+  }
+
+  /* ---- crop box: dimmed surround, rule-of-thirds grid, corner + edge handles, live size label ---- */
+  function pxPerScreen(){ var cw = (overlay.clientWidth || overlay.width) * (view ? view.z : 1); return cw ? overlay.width / cw : 1; }
+  function drawCropBox(){
+    var r = cropRect, k = pxPerScreen(), W = overlay.width, H = overlay.height;
+    if(!r || r.w < 1 || r.h < 1) return;
+    octx.save();
+    octx.fillStyle = 'rgba(0,0,0,0.55)'; octx.fillRect(0, 0, W, H);
+    octx.clearRect(r.x, r.y, r.w, r.h);
+    // rule of thirds
+    octx.lineWidth = Math.max(0.75, 1 * k);
+    octx.strokeStyle = cropDrag ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.45)';
+    octx.beginPath();
+    for(var i = 1; i < 3; i++){
+      var gx = r.x + r.w * i / 3, gy = r.y + r.h * i / 3;
+      octx.moveTo(gx, r.y); octx.lineTo(gx, r.y + r.h);
+      octx.moveTo(r.x, gy); octx.lineTo(r.x + r.w, gy);
+    }
+    octx.stroke();
+    // frame
+    octx.strokeStyle = '#39ff9d'; octx.lineWidth = Math.max(1, 1.5 * k);
+    octx.strokeRect(r.x, r.y, r.w, r.h);
+    // corner brackets + edge-middle grips
+    var t = Math.max(2, 4 * k), len = Math.min(20 * k, r.w / 3, r.h / 3), mid = Math.min(16 * k, r.w / 4, r.h / 4);
+    octx.strokeStyle = '#39ff9d'; octx.lineWidth = t; octx.lineCap = 'butt';
+    octx.beginPath();
+    var x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h, cx = r.x + r.w / 2, cy = r.y + r.h / 2, o = t / 2;
+    octx.moveTo(x0 - o, y0 + len); octx.lineTo(x0 - o, y0 - o); octx.lineTo(x0 + len, y0 - o);
+    octx.moveTo(x1 - len, y0 - o); octx.lineTo(x1 + o, y0 - o); octx.lineTo(x1 + o, y0 + len);
+    octx.moveTo(x0 - o, y1 - len); octx.lineTo(x0 - o, y1 + o); octx.lineTo(x0 + len, y1 + o);
+    octx.moveTo(x1 - len, y1 + o); octx.lineTo(x1 + o, y1 + o); octx.lineTo(x1 + o, y1 - len);
+    octx.moveTo(cx - mid / 2, y0 - o); octx.lineTo(cx + mid / 2, y0 - o);
+    octx.moveTo(cx - mid / 2, y1 + o); octx.lineTo(cx + mid / 2, y1 + o);
+    octx.moveTo(x0 - o, cy - mid / 2); octx.lineTo(x0 - o, cy + mid / 2);
+    octx.moveTo(x1 + o, cy - mid / 2); octx.lineTo(x1 + o, cy + mid / 2);
+    octx.stroke();
+    // live size label
+    if(r.w > 96 * k && r.h > 44 * k){
+      var txt = Math.round(r.w) + ' \u00d7 ' + Math.round(r.h), fs = 11 * k;
+      octx.font = '600 ' + fs + 'px "JetBrains Mono", monospace'; octx.textBaseline = 'middle';
+      var tw = octx.measureText(txt).width, px = 6 * k, ph = 20 * k, lx = r.x + 8 * k, ly = r.y + 8 * k;
+      octx.fillStyle = 'rgba(0,0,0,0.7)'; octx.fillRect(lx, ly, tw + px * 2, ph);
+      octx.fillStyle = '#ffffff'; octx.fillText(txt, lx + px, ly + ph / 2 + 0.5 * k);
+    }
+    octx.restore();
+  }
+  function cropMinSize(){ return Math.min(Math.max(8, 28 * pxPerScreen()), canvas.width, canvas.height); }
+  // what is under the pointer: a handle (edge / corner), the inside of the box, or nothing
+  function cropHit(p, coarse){
+    var r = cropRect; if(!r || r.w < 2 || r.h < 2) return null;
+    var k = pxPerScreen(), tol = (coarse ? 24 : 12) * k;
+    tol = Math.min(tol, Math.min(r.w, r.h) / 3);          // small boxes keep a grabbable middle
+    var x1 = r.x + r.w, y1 = r.y + r.h;
+    if(p.x < r.x - tol || p.x > x1 + tol || p.y < r.y - tol || p.y > y1 + tol) return null;
+    var hx = Math.abs(p.x - r.x) <= tol ? 'w' : (Math.abs(p.x - x1) <= tol ? 'e' : '');
+    var hy = Math.abs(p.y - r.y) <= tol ? 'n' : (Math.abs(p.y - y1) <= tol ? 's' : '');
+    if(hx || hy) return { mode: 'resize', h: hy + hx };
+    if(p.x >= r.x && p.x <= x1 && p.y >= r.y && p.y <= y1) return { mode: 'move' };
+    return null;
+  }
+  var CROP_CURSOR = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize' };
+  function cropHover(p){
+    if(handMode || spaceDown || activeTool !== 'edit' || !editSelecting) return;
+    var h = cropHit(p, false);
+    overlay.style.cursor = !h ? '' : (h.mode === 'move' ? 'move' : CROP_CURSOR[h.h]);
+  }
+  function cropBegin(p, coarse){
+    var h = cropHit(p, coarse);
+    if(h && h.mode === 'move') cropDrag = { mode: 'move', dx: p.x - cropRect.x, dy: p.y - cropRect.y };
+    else if(h) cropDrag = { mode: 'resize', h: h.h, r0: { x: cropRect.x, y: cropRect.y, w: cropRect.w, h: cropRect.h } };
+    else { cropDrag = { mode: 'new', sx: p.x, sy: p.y }; cropRect = { x: p.x, y: p.y, w: 0, h: 0 }; }
+  }
+  function cropUpdate(p){
+    var W = canvas.width, H = canvas.height, r = cropRatioVal(), d = cropDrag, mn = cropMinSize();
+    var px = Math.min(W, Math.max(0, p.x)), py = Math.min(H, Math.max(0, p.y));
+    if(d.mode === 'move'){
+      cropRect.x = Math.min(W - cropRect.w, Math.max(0, p.x - d.dx));
+      cropRect.y = Math.min(H - cropRect.h, Math.max(0, p.y - d.dy));
+    } else if(d.mode === 'new'){
+      var x0 = d.sx, y0 = d.sy, dirx = p.x < x0 ? -1 : 1, diry = p.y < y0 ? -1 : 1;
+      var maxW = dirx > 0 ? W - x0 : x0, maxH = diry > 0 ? H - y0 : y0;
+      var aw = Math.min(Math.abs(p.x - x0), maxW), ah = Math.min(Math.abs(p.y - y0), maxH);
+      if(r > 0){
+        if(aw / Math.max(ah, 1e-6) > r) aw = ah * r; else ah = aw / r;
+        if(aw > maxW){ aw = maxW; ah = aw / r; }
+        if(ah > maxH){ ah = maxH; aw = ah * r; }
+      }
+      cropRect = { x: dirx > 0 ? x0 : x0 - aw, y: diry > 0 ? y0 : y0 - ah, w: aw, h: ah };
+    } else {
+      var o = d.r0, hh = d.h, L = o.x, T = o.y, R = o.x + o.w, B = o.y + o.h;
+      var west = hh.indexOf('w') >= 0, east = hh.indexOf('e') >= 0, north = hh.indexOf('n') >= 0, south = hh.indexOf('s') >= 0;
+      if(r > 0){
+        var w, h;
+        if((west || east) && (north || south)){                        // corner: opposite corner stays put
+          var ax = west ? R : L, ay = north ? B : T;
+          var mxW = west ? ax : W - ax, mxH = north ? ay : H - ay;
+          w = Math.max(Math.abs(px - ax), Math.abs(py - ay) * r);
+          w = Math.min(w, mxW, mxH * r); w = Math.max(w, Math.min(Math.max(mn, mn * r), mxW, mxH * r)); h = w / r;
+          L = west ? ax - w : ax; T = north ? ay - h : ay; R = L + w; B = T + h;
+        } else if(west || east){                                       // side edge: opposite edge stays, height follows the ratio
+          var axe = west ? R : L, mxWe = Math.min(west ? axe : W - axe, H * r), cyc = o.y + o.h / 2;
+          w = Math.min(Math.abs(px - axe), mxWe); w = Math.max(w, Math.min(Math.max(mn, mn * r), mxWe)); h = w / r;
+          L = west ? axe - w : axe; R = L + w; T = Math.min(H - h, Math.max(0, cyc - h / 2)); B = T + h;
+        } else {                                                       // top / bottom edge
+          var aye = north ? B : T, mxHe = Math.min(north ? aye : H - aye, W / r), cxc = o.x + o.w / 2;
+          h = Math.min(Math.abs(py - aye), mxHe); h = Math.max(h, Math.min(Math.max(mn, mn / r), mxHe)); w = h * r;
+          T = north ? aye - h : aye; B = T + h; L = Math.min(W - w, Math.max(0, cxc - w / 2)); R = L + w;
+        }
+      } else {
+        if(west)  L = Math.min(px, R - mn);
+        if(east)  R = Math.max(px, L + mn);
+        if(north) T = Math.min(py, B - mn);
+        if(south) B = Math.max(py, T + mn);
+      }
+      cropRect = { x: L, y: T, w: R - L, h: B - T };
     }
   }
 
@@ -2682,12 +2789,10 @@
       painting = true; lastPaintPt = null; paintDab(p);
     } else if(activeTool === 'bgremove'){
       bgPainting = true; bgLast = null; bgDab(p);
-    } else if(activeTool === 'advanced' || activeTool === 'edit'){
-      if(cropRect && cropRect.w > 4 && cropRect.h > 4 && p.x >= cropRect.x && p.x <= cropRect.x + cropRect.w && p.y >= cropRect.y && p.y <= cropRect.y + cropRect.h){
-        cropMoving = {dx: p.x - cropRect.x, dy: p.y - cropRect.y};
-      } else {
-        cropping = true; cropStart = p; cropRect = {x:p.x, y:p.y, w:0, h:0};
-      }
+    } else if(activeTool === 'edit'){
+      cropBegin(p, !!e.touches); redrawOverlay();
+    } else if(activeTool === 'advanced'){
+      if(view.z > 1){ var c2 = clientXY(e); panDrag = {x: c2.x, y: c2.y}; overlay.style.cursor = 'grabbing'; }   // zoomed in: a plain drag pans the photo
     }
   }
   function pointerMove(e){
@@ -2701,32 +2806,23 @@
     var p = overlayPoint(e);
     if(painting){ e.preventDefault(); paintDab(p); }
     else if(bgPainting){ e.preventDefault(); bgDab(p); }
-    else if(cropMoving){
+    else if(cropDrag){
       e.preventDefault();
-      cropRect.x = Math.min(canvas.width - cropRect.w, Math.max(0, p.x - cropMoving.dx));
-      cropRect.y = Math.min(canvas.height - cropRect.h, Math.max(0, p.y - cropMoving.dy));
-      redrawOverlay();
+      cropUpdate(p); redrawOverlay();
     }
-    else if(cropping){
-      e.preventDefault();
-      var W = canvas.width, H = canvas.height, x0 = cropStart.x, y0 = cropStart.y, r = cropRatioVal();
-      var dirx = p.x < x0 ? -1 : 1, diry = p.y < y0 ? -1 : 1;
-      var maxW = dirx > 0 ? W - x0 : x0, maxH = diry > 0 ? H - y0 : y0;
-      var aw = Math.min(Math.abs(p.x - x0), maxW), ah = Math.min(Math.abs(p.y - y0), maxH);
-      if(r > 0){
-        if(aw/Math.max(ah, 1e-6) > r) aw = ah*r; else ah = aw/r;
-        if(aw > maxW){ aw = maxW; ah = aw/r; }
-        if(ah > maxH){ ah = maxH; aw = ah*r; }
-      }
-      cropRect = { x: dirx > 0 ? x0 : x0 - aw, y: diry > 0 ? y0 : y0 - ah, w: aw, h: ah };
-      redrawOverlay();
-    }
+    else if(e.type === 'mousemove' && activeTool === 'edit'){ cropHover(p); }
   }
   function pointerUp(e){
     if(e && e.touches && e.touches.length >= 1 && gest){ if(e.touches.length < 2) gest = null; return; }
     gest = null;
     if(panDrag){ panDrag = null; updateZoomBar(); }
     painting = false; cropping = false; cropMoving = null; lastPaintPt = null;
+    if(cropDrag){
+      var wasNew = cropDrag.mode === 'new'; cropDrag = null;
+      if(wasNew && cropRect && (cropRect.w < 6 * pxPerScreen() || cropRect.h < 6 * pxPerScreen())) cropRect = null;   // a plain click just deselects
+      else if(cropRect){ cropRect = { x: Math.max(0, cropRect.x), y: Math.max(0, cropRect.y), w: Math.min(canvas.width, cropRect.w), h: Math.min(canvas.height, cropRect.h) }; }
+      redrawOverlay();
+    }
     if(bgPainting){ bgPainting = false; bgLast = null; bakeToOriginal(function(){ syncOverlay(); }); }
   }
   /* ---- Remove BG touch-up: restore / erase brush + one-click background ---- */
@@ -2787,7 +2883,7 @@
     document.getElementById('cropClearE').addEventListener('click', function(){ cropRect = null; redrawOverlay(); });
     document.getElementById('cropApplyE').addEventListener('click', function(){
       if(!cropRect || cropRect.w < 4 || cropRect.h < 4){ setSel(true); return; }
-      document.getElementById('applyCrop').click(); setSel(false);
+      applyCropNow(); setSel(false);
     });
     document.getElementById('regionApply').addEventListener('click', function(){
       if(!originalImg){ return; }
@@ -2848,7 +2944,10 @@
   }
   ['mousedown','touchstart'].forEach(function(ev){ overlay.addEventListener(ev, pointerDown, {passive:false}); });
   ['mousemove','touchmove'].forEach(function(ev){ overlay.addEventListener(ev, pointerMove, {passive:false}); });
-  ['mouseup','mouseleave','touchend','touchcancel'].forEach(function(ev){ overlay.addEventListener(ev, pointerUp); });
+  ['mouseup','touchend','touchcancel'].forEach(function(ev){ overlay.addEventListener(ev, pointerUp); });
+  overlay.addEventListener('mouseleave', function(e){ if(cropDrag) return; pointerUp(e); });   // a crop drag keeps going outside the photo
+  window.addEventListener('mousemove', function(e){ if(cropDrag && e.target !== overlay) pointerMove(e); });
+  window.addEventListener('mouseup', function(e){ if(cropDrag) pointerUp(e); });
   // overlay sits inside the <label> that opens the file picker on click —
   // stop that default so painting/cropping doesn't also pop the file dialog.
   overlay.addEventListener('click', function(e){ if(overlay.classList.contains('active')){ e.preventDefault(); e.stopPropagation(); } });
@@ -2869,11 +2968,11 @@
   document.getElementById('orClear').addEventListener('click', function(){
     mctx.clearRect(0,0,maskCanvas.width,maskCanvas.height); maskBox = null; redrawOverlay();
   });
-  document.getElementById('clearCrop').addEventListener('click', function(){ cropRect = null; redrawOverlay(); });
-
-  document.getElementById('applyCrop').addEventListener('click', function(){
-    if(!cropRect || cropRect.w < 4 || cropRect.h < 4){ return; }
-    var cx = Math.round(cropRect.x), cy = Math.round(cropRect.y), cw = Math.round(cropRect.w), ch = Math.round(cropRect.h);
+  function applyCropNow(){
+    if(!originalImg || !cropRect || cropRect.w < 4 || cropRect.h < 4){ return; }
+    var cx = Math.max(0, Math.round(cropRect.x)), cy = Math.max(0, Math.round(cropRect.y));
+    var cw = Math.min(canvas.width - cx, Math.round(cropRect.w)), ch = Math.min(canvas.height - cy, Math.round(cropRect.h));
+    if(cw < 2 || ch < 2) return;
     var out = document.createElement('canvas'); out.width = cw; out.height = ch;
     out.getContext('2d').drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
     var snap = new Image();
@@ -2889,6 +2988,13 @@
       commitHistory();
     };
     canvasToUrl(out, function(u){ snap.src = u; });
+  }
+  // Enter applies the crop, Esc clears it (only while the crop tool is active and focus isn't in a control)
+  window.addEventListener('keydown', function(e){
+    if(activeTool !== 'edit' || !editSelecting || !cropRect || e.isComposing) return;
+    var tg = (e.target && e.target.tagName) || ''; if(/INPUT|TEXTAREA|SELECT|BUTTON/.test(tg) || (e.target && e.target.isContentEditable)) return;
+    if(e.key === 'Enter'){ e.preventDefault(); document.getElementById('cropApplyE').click(); }
+    else if(e.key === 'Escape'){ e.preventDefault(); cropRect = null; redrawOverlay(); }
   });
 
   /* ---------------- object removal: fallback exemplar-based patch fill ----------------
@@ -5916,7 +6022,14 @@
     var mid = document.createElement('canvas'), mx = mid.getContext('2d');
     var header = document.querySelector('header.top');
     var on = false, g = null, lastKey = '', hideT = 0, drawRaf = 0, evalRaf = 0;
-    var userPos = null;          // {left, top} once the person has dragged the card; cleared whenever it flies home
+    var userPos = null;          // {left, top} once the person has dragged the card; kept when the card hides, so it comes back to the same spot
+    var posStore = { s: null, p: null }, curMode = null;   // remembered spot for the side (desktop) and floating (small-screen) layouts
+    try{ ['s', 'p'].forEach(function(k){ var v = JSON.parse(localStorage.getItem('apic_dock_pos_' + k) || 'null'); if(v && isFinite(v.left) && isFinite(v.top)) posStore[k] = { left: v.left, top: v.top }; }); }catch(e){}
+    function savePos(){
+      if(!curMode) return;
+      posStore[curMode] = userPos ? { left: userPos.left, top: userPos.top } : null;
+      try{ var key = 'apic_dock_pos_' + curMode; if(userPos) localStorage.setItem(key, JSON.stringify(posStore[curMode])); else localStorage.removeItem(key); }catch(e){}
+    }
     var drag = null, dragging = false, glideT = 0;
     var off = false, userW = null, rsd = null, prevShift = 0, shiftT = 0, settleT = 0, hqNext = false;   // off = person turned the preview off; userW = card width they chose
     try{ off = localStorage.getItem('apic_dock_off') === '1'; var sw = parseInt(localStorage.getItem('apic_dock_w'), 10); if(sw >= 150 && sw <= 1600) userW = sw; }catch(e){}
@@ -5962,6 +6075,8 @@
     function geometry(){
       var vw = window.innerWidth, vh = window.innerHeight;
       var side = vw >= 900, maxed = studio.classList.contains('maximized');
+      var modeNow = side ? 's' : 'p';
+      if(modeNow !== curMode){ curMode = modeNow; userPos = posStore[modeNow] ? { left: posStore[modeNow].left, top: posStore[modeNow].top } : null; }
       var sr = studio.getBoundingClientRect();
       var aspect = canvas.width / Math.max(1, canvas.height);
       var cap = side ? 26 : 22, imgW, imgH, w, top, left, shift = 0;
@@ -5990,7 +6105,7 @@
         imgW = cw - 14; imgH = imgW / aspect;
         if(imgH > maxH){ imgH = maxH; imgW = imgH * aspect; }
         w = Math.max(130, Math.round(imgW + 14));
-        left = 10;
+        left = Math.max(10, vw - w - 10);          // small screens: park on the right, where the page is mostly empty
       }
       imgW = Math.round(imgW); imgH = Math.max(24, Math.round(imgH));
       var h = imgH + 6 + cap + 2;
@@ -6119,8 +6234,8 @@
       on = false;
       clearTimeout(hideT);
       cancelDrag();
-      // flying home: forget the custom spot (g still describes where the card is right now, so the flight starts from there)
-      userPos = null; clearTimeout(glideT); el.classList.remove('moved', 'gliding');
+      // flying home (g still describes where the card is right now, so the flight starts from there); the chosen spot is remembered for next time
+      clearTimeout(glideT); el.classList.remove('moved', 'gliding');
       studio.classList.remove('apic-docked-side');
       studio.parentElement.classList.remove('apic-docked-side');
       if(!el.classList.contains('on')) return;
@@ -6192,6 +6307,7 @@
       drag = null; dragging = false;
       el.classList.remove('dragging'); setHtmlDragging(false);
       if(moved){
+        savePos();
         glide(); lastKey = ''; applyGeometry();       // now the controls glide to make room
         if(!reduced()){ el.classList.remove('sheen'); void el.offsetWidth; el.classList.add('sheen'); }
         requestDraw(); schedule();
@@ -6231,7 +6347,7 @@
     });
     homeBtn.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation();
-      userPos = null; glide(); lastKey = ''; applyGeometry(); requestDraw(); schedule();
+      userPos = null; savePos(); glide(); lastKey = ''; applyGeometry(); requestDraw(); schedule();
     });
     el.addEventListener('keydown', function(e){
       if(e.target !== el) return;
@@ -6239,11 +6355,11 @@
       var step = e.shiftKey ? 60 : 20, dx = 0, dy = 0;
       if(e.key === 'ArrowLeft') dx = -step; else if(e.key === 'ArrowRight') dx = step;
       else if(e.key === 'ArrowUp') dy = -step; else if(e.key === 'ArrowDown') dy = step;
-      else if(e.key === 'Escape' && userPos){ e.preventDefault(); userPos = null; glide(); lastKey = ''; applyGeometry(); requestDraw(); return; }
+      else if(e.key === 'Escape' && userPos){ e.preventDefault(); userPos = null; savePos(); glide(); lastKey = ''; applyGeometry(); requestDraw(); return; }
       else return;
       if(!on || !g) return;
       e.preventDefault();
-      userPos = clampPos(g.left + dx, g.top + dy, g.w, g.h, false);
+      userPos = clampPos(g.left + dx, g.top + dy, g.w, g.h, false); savePos();
       glide(); lastKey = ''; applyGeometry(); requestDraw();
     });
 
@@ -12204,6 +12320,70 @@ html:not([data-theme="light"]) #apicLangBtn{color:var(--btn-text);border-color:v
 /* keep keyboard users oriented */
 .btn:focus-visible,.tool-btn:focus-visible,.quick-btn:focus-visible,.hist-btn:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 </style>
+<style id="apic-polish-css">
+  /* ===== Recent work: remove one photo at a time ===== */
+  #recentSec .rc-list{padding-top:2px;}
+  #recentSec .rc-card{position:relative; flex:0 0 auto; transition:opacity .2s ease, transform .2s ease;}
+  #recentSec .rc-card.gone{opacity:0; transform:scale(.9); pointer-events:none;}
+  #recentSec .rc-del{
+    position:absolute; top:10px; right:10px; width:22px; height:22px; padding:0; border-radius:50%;
+    border:1px solid rgba(255,255,255,.35); background:rgba(8,10,12,.72); color:#fff;
+    font:600 14px/1 var(--mono); cursor:pointer; display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity .15s ease, background .15s ease, border-color .15s ease;
+  }
+  #recentSec .rc-card:hover .rc-del, #recentSec .rc-card:focus-within .rc-del, #recentSec .rc-del:focus-visible{opacity:1;}
+  #recentSec .rc-del:hover{background:#c62828; border-color:#ff8a80;}
+  #recentSec .rc-del:focus-visible, #recentSec .rc-head button:focus-visible, #recentSec .rc-item:focus-visible{outline:2px solid var(--cyan); outline-offset:2px;}
+  #recentSec .rc-head button.armed{color:#ff6b6b; border-color:#ff6b6b;}
+  @media (hover:none), (pointer:coarse){ #recentSec .rc-del{opacity:1; width:28px; height:28px; font-size:16px; top:8px; right:8px;} }
+
+  /* ===== Light theme: readable accents (the neon green is for dark surfaces, buttons and glows only) ===== */
+  html[data-theme="light"]{--green-ink:#06683a; --cyan-ink:#065f7a; --text-muted:#454a3d;}
+  html[data-theme="light"] .eyebrow,
+  html[data-theme="light"] .tb-title b,
+  html[data-theme="light"] .row .val,
+  html[data-theme="light"] .adv-sec > summary::after,
+  html[data-theme="light"] .frame-num,
+  html[data-theme="light"] .counter-num,
+  html[data-theme="light"] .footer-copy b,
+  html[data-theme="light"] .faq-item summary::after,
+  html[data-theme="light"] .drop svg,
+  html[data-theme="light"] .tool-btn.active,
+  html[data-theme="light"] .curve-tabs button.on,
+  html[data-theme="light"] .hsl-tabs button.on,
+  html[data-theme="light"] #zoomBar button.on,
+  html[data-theme="light"] .hist-btn:hover:not(:disabled),
+  html[data-theme="light"] .hist-btn.dock-toggle[aria-pressed="true"],
+  html[data-theme="light"] .seo-links a:hover,
+  html[data-theme="light"] .legal-links a:hover,
+  html[data-theme="light"] #apicTop,
+  html[data-theme="light"] #apicDock .ad-home:hover,
+  html[data-theme="light"] #panel-social .so-chip.on,
+  html[data-theme="light"] #panel-social .so-seg button.on,
+  html[data-theme="light"] #panel-social .so-item .dm,
+  html[data-theme="light"] #panel-social .so-sel .tx small,
+  html[data-theme="light"] .lyr-ic:hover, html[data-theme="light"] .lyr-ic.on,
+  html[data-theme="light"] .ds-ok, html[data-theme="light"] .ds-badge.loaded{color:var(--green-ink);}
+  html[data-theme="light"] .eyebrow::before{background:var(--green-ink);}
+  html[data-theme="light"] .counter-num{text-shadow:none;}
+  html[data-theme="light"] .tool-btn.active, html[data-theme="light"] .curve-tabs button.on, html[data-theme="light"] .hsl-tabs button.on,
+  html[data-theme="light"] #zoomBar button.on, html[data-theme="light"] .hist-btn.dock-toggle[aria-pressed="true"]{border-color:var(--green-ink);}
+  html[data-theme="light"] .brand-word{background-image:linear-gradient(120deg, #06683a 0%, #065f7a 55%, #a3107f 100%);}
+  html[data-theme="light"] .adv-sec > summary{color:var(--text);}
+  html[data-theme="light"] .hist-stats, html[data-theme="light"] .hist-stats span{color:var(--text-muted);}
+  html[data-theme="light"] .btn-ghost{color:var(--text); border-color:color-mix(in srgb, var(--text) 32%, transparent);}
+  html[data-theme="light"] .btn-ghost:hover:not(:disabled){color:var(--green-ink); border-color:var(--green-ink);}
+
+  /* ===== Small screens: left-aligned layout leaves the right side free for the floating preview ===== */
+  @media (max-width:899px){
+    .studio-wrap > .eyebrow{justify-content:flex-start !important; text-align:left;}
+    .studio.has-image .drop canvas#canvas{align-self:flex-start;}
+    body.studio-active .studio-wrap > .studio:not(.maximized){align-self:flex-start; width:100%;}
+  }
+  @media (min-width:560px) and (max-width:899px){
+    body.studio-active .studio-wrap > .studio:not(.maximized){max-width:max(400px, calc(100% - 270px));}
+  }
+</style>
 <style id="apic-i18n-css">
 #apicLangBtn{position:fixed;right:76px;bottom:calc(18px + env(safe-area-inset-bottom,0px));z-index:150;display:flex;gap:6px;align-items:center;min-height:44px;padding:0 14px;border-radius:30px;background:var(--bg-2);color:var(--text);border:1px solid var(--line);cursor:pointer;font:600 13px/1 system-ui,sans-serif;box-shadow:var(--shadow,0 4px 16px #0004)}
 #apicLangBtn.docked{position:static;right:auto;bottom:auto;z-index:auto;min-height:40px;min-width:40px;padding:0 11px;border-radius:10px;justify-content:center;box-shadow:none;flex:0 0 auto;white-space:nowrap}
@@ -12456,6 +12636,7 @@ html:not([lang="en"]) body *{letter-spacing:normal!important}
       all = (all || []).sort(function(a, b){ return b.ts - a.ts; });
       list.textContent = '';
       all.forEach(function(it){
+        var card = document.createElement('div'); card.className = 'rc-card';
         var b = document.createElement('button'); b.type = 'button'; b.className = 'rc-item'; b.title = 'Reopen ' + it.name;
         var im = document.createElement('img'), u = URL.createObjectURL(it.blob); urls.push(u); im.src = u; im.alt = '';
         var sp = document.createElement('span'); sp.textContent = it.name;
@@ -12467,12 +12648,28 @@ html:not([lang="en"]) body *{letter-spacing:normal!important}
           try{ var dt = new DataTransfer(); dt.items.add(f); fi.files = dt.files; fi.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
           var st = $('drop'); if(st && st.scrollIntoView) st.scrollIntoView({block:'center', behavior:'smooth'});
         });
-        list.appendChild(b);
+        var del = document.createElement('button'); del.type = 'button'; del.className = 'rc-del';
+        del.title = 'Remove from recent work'; del.setAttribute('aria-label', 'Remove ' + it.name + ' from recent work'); del.textContent = '\u00d7';
+        del.addEventListener('click', function(ev){
+          ev.preventDefault(); ev.stopPropagation();
+          card.classList.add('gone');
+          tx('readwrite', function(os){ os.delete(it.id); return null; }).then(renderRecent).catch(function(){ card.classList.remove('gone'); });
+        });
+        card.appendChild(b); card.appendChild(del); list.appendChild(card);
       });
       sec.classList.toggle('show', all.length > 0 && !document.querySelector('.studio.has-image'));
     }).catch(function(){});
   }
-  $('rcClear').addEventListener('click', function(){ tx('readwrite', function(os){ os.clear(); return null; }).then(renderRecent).catch(function(){}); });
+  (function(){   // "Clear" wipes everything, so ask for a second tap first (single photos have their own × button)
+    var btn = $('rcClear'), armT = 0, label = btn.textContent;
+    btn.title = 'Clear all recent work (or use the × on a photo to remove just that one)';
+    function disarm(){ clearTimeout(armT); armT = 0; btn.textContent = label; btn.classList.remove('armed'); }
+    btn.addEventListener('click', function(){
+      if(!armT){ btn.textContent = 'Tap again to clear all'; btn.classList.add('armed'); armT = setTimeout(disarm, 3200); return; }
+      disarm();
+      tx('readwrite', function(os){ os.clear(); return null; }).then(renderRecent).catch(function(){});
+    });
+  })();
   window.addEventListener('load', function(){ setTimeout(renderRecent, 400); });
   document.addEventListener('click', function(e){ if(e.target && e.target.id === 'removeImgBtn') setTimeout(renderRecent, 300); });
   document.addEventListener('apic:loaded', function(){ var sec = $('recentSec'); if(sec) sec.classList.remove('show'); });

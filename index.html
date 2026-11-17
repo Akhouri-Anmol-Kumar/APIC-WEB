@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>APIC | Free Online Photo Editor, Background Remover & Image Converter</title>
 <meta name="description" content="APIC is a free online photo editor that runs entirely in your browser — edit, convert, compress, resize and remove image backgrounds with on-device AI. No uploads, no signup required — your photos never leave your device. An Akhouri Systems product." />
 <meta name="keywords" content="remove.bg alternative, free remove.bg alternative, best remove.bg alternative, remove.bg free alternative, remove.bg replacement, best background remover, best free background remover, background remover online free, remove background from image free, remove background no upload, background remover no signup, AI background remover, transparent background maker, remove bg online, photo background remover, online photo editor, remove background from image, image converter, compress image online, resize image, free photo editor, no upload image editor, PNG to JPG, WebP converter, background remover AI, social media image resizer, profile picture maker, banner maker, YouTube banner size, Instagram post size" />
@@ -21,23 +21,23 @@
   document.documentElement.setAttribute('data-theme', t);
 })();
 </script>
-<link rel="canonical" href="https://apic-online.vercel.app/" />
+<link rel="canonical" href="https://apic-studio.vercel.app/" />
 
 <!-- Open Graph / social share preview -->
 <meta property="og:title" content="APIC | Free Online Photo Editor, Background Remover & Image Converter" />
 <meta property="og:description" content="Edit, convert, compress, resize and remove image backgrounds — free, in your browser, no upload to any server, no signup required." />
-<meta property="og:image" content="https://apic-online.vercel.app/apic-og-image.png" />
+<meta property="og:image" content="https://apic-studio.vercel.app/apic-og-image.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
 <meta property="og:image:alt" content="APIC — free in-browser photo editor and background remover" />
 <meta property="og:type" content="website" />
-<meta property="og:url" content="https://apic-online.vercel.app/" />
+<meta property="og:url" content="https://apic-studio.vercel.app/" />
 <meta property="og:site_name" content="APIC" />
 <meta property="og:locale" content="en_US" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="APIC — Free Online Photo Editor & Background Remover" />
 <meta name="twitter:description" content="Edit, convert, compress and remove image backgrounds — free, right in your browser. No uploads, no signup." />
-<meta name="twitter:image" content="https://apic-online.vercel.app/apic-og-image.png" />
+<meta name="twitter:image" content="https://apic-studio.vercel.app/apic-og-image.png" />
 <meta name="twitter:image:alt" content="APIC — free in-browser photo editor and background remover" />
 
 <!-- Structured data for search engines -->
@@ -46,7 +46,7 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "APIC — Advanced Image Processing Center",
-  "url": "https://apic-online.vercel.app/",
+  "url": "https://apic-studio.vercel.app/",
   "applicationCategory": "PhotoEditingApplication",
   "operatingSystem": "Any (runs in web browser)",
   "description": "APIC is a free online photo editor that runs in your browser. Edit, convert, compress, resize and remove image backgrounds with on-device AI. No uploads, no sign-up required.",
@@ -80,7 +80,7 @@
     "Crop with ratio presets and straighten",
     "Batch processing with ZIP download"
   ],
-  "image": "https://apic-online.vercel.app/apic-og-image.png",
+  "image": "https://apic-studio.vercel.app/apic-og-image.png",
   "isAccessibleForFree": true,
   "applicationSubCategory": "Background remover, photo editor, image converter",
   "browserRequirements": "Requires JavaScript and WebAssembly",
@@ -93,7 +93,7 @@
   "@type": "WebSite",
   "name": "APIC",
   "alternateName": "APIC Web",
-  "url": "https://apic-online.vercel.app/",
+  "url": "https://apic-studio.vercel.app/",
   "inLanguage": "en",
   "publisher": {
     "@type": "Organization",
@@ -12759,7 +12759,7 @@ html:not([lang="en"]) body *{letter-spacing:normal!important}
 /* Mobile-only comfort layer. Everything is gated to phones/tablets; desktop is untouched. */
 .tool-btn.ds-chip{display:none}
 @media (max-width:820px){
-  .bench-tools{display:flex;grid-template-columns:none;overflow-x:auto;gap:8px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);padding-right:24px}
+  .bench-tools{display:flex;grid-template-columns:none;overflow-x:auto;gap:8px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-right:16px;overscroll-behavior-x:contain}
   .bench-tools::-webkit-scrollbar{display:none}
   .tool-btn{flex:none;scroll-snap-align:start;white-space:nowrap;min-height:44px;padding:11px 14px}
   .tool-btn:hover:not(:disabled){transform:none}
@@ -12774,6 +12774,42 @@ html:not([lang="en"]) body *{letter-spacing:normal!important}
   .row{margin-bottom:14px}
   .bench-panel > p.hint.hint-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
   .bench-panel > p.hint.hint-clamp[aria-expanded="true"]{display:block;-webkit-line-clamp:unset}
+}
+/* ---- Overflow guard: the page never scrolls sideways (fixes iPhone SE extra width) ---- */
+@media (max-width:820px){
+  html,body{max-width:100%;overflow-x:clip}
+  body.studio-active .bench-footer{flex-wrap:wrap;row-gap:6px}
+  body.studio-active .bench-footer #apicPrivNote{order:-1;flex:1 1 100%;margin:0;padding:7px 8px 7px 10px;font-size:12px;line-height:1.4}
+  #apicPrivNote span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+  #apicPrivNote.open span{-webkit-line-clamp:unset;display:block}
+  body.studio-active .bench-footer #fileInfo{flex:1 1 0;min-width:0}
+  body.studio-active .bench-footer .btn{flex:0 1 auto;min-width:0;padding-left:12px;padding-right:12px;white-space:nowrap}
+  body.studio-active .bench-footer #exportBtn{flex:1 1 auto;justify-content:center;text-align:center}
+  body.studio-active #apicTop{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+  /* "there is more" cue for the tool strip */
+  .tools-rail{display:block;position:relative;min-width:0}
+  .tools-arrow{position:absolute;top:0;bottom:0;width:40px;border:0;padding:0 2px;display:flex;align-items:center;cursor:pointer;color:var(--green);opacity:0;pointer-events:none;transition:opacity .22s ease;z-index:3;background:none;-webkit-tap-highlight-color:transparent}
+  .tools-arrow.r{right:0;justify-content:flex-end}
+  .tools-arrow.l{left:0;justify-content:flex-start}
+  .tools-arrow i{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--bg-2);border:1px solid var(--green);box-shadow:var(--glow-green),0 2px 10px rgba(0,0,0,.18);font:700 18px/1 var(--mono,monospace);font-style:normal;padding-bottom:2px}
+  .tools-arrow:focus-visible i{outline:2px solid var(--cyan,var(--green));outline-offset:2px}
+  .tools-rail.can-r .tools-arrow.r,.tools-rail.can-l .tools-arrow.l{opacity:1;pointer-events:auto}
+  .tools-rail.can-r .tools-arrow.r i{animation:toolsNudge 1.5s ease-in-out 4}
+  @keyframes toolsNudge{0%,100%{transform:translateX(0)}50%{transform:translateX(4px)}}
+  /* compact storage notice so it never hides the editor */
+  #storageNotice{font-size:12.5px !important;line-height:1.35}
+}
+@media (max-width:820px) and (prefers-reduced-motion:reduce){ .tools-rail.can-r .tools-arrow.r i{animation:none} }
+/* ---- Touch comfort (any touch screen) ---- */
+@media (pointer:coarse){
+  button,.btn,.tool-btn,summary,select,label,input[type=range],input[type=checkbox]{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  .btn:active:not(:disabled),.tool-btn:active:not(:disabled){transform:scale(.97);transition:transform .08s ease}
+  input[type=text],input[type=number],input[type=search],input[type=email],input[type=password],input[type=url],select,textarea{font-size:16px}   /* stops iOS zooming the page on focus */
+  input[type=range]{min-height:32px}
+  html:has(body.studio-active){overscroll-behavior-y:contain}   /* an accidental pull-down will not reload and lose edits */
+}
+@supports (padding:max(0px)){
+  @media (max-width:820px){ body{padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)} }
 }
 </style>
 <script id="apic-mobile-js">
@@ -12805,6 +12841,92 @@ html:not([lang="en"]) body *{letter-spacing:normal!important}
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', init); else init();
   window.addEventListener('load', function(){ setTimeout(init, 800); });
+})();
+/* Mobile comfort v2: tool-strip arrows + first-time peek, haptics, privacy-note tidy. */
+(function(){
+  'use strict';
+  var mq = window.matchMedia ? window.matchMedia('(max-width:820px)') : {matches:false};
+  var coarse = window.matchMedia ? window.matchMedia('(pointer:coarse)') : {matches:false};
+  var rail = null, strip = null;
+  function paintRail(){
+    if(!rail) return;
+    var e = rail, c = '';
+    while(e && e !== document.documentElement){
+      c = getComputedStyle(e).backgroundColor;
+      if(c && !/rgba?\(\s*0,\s*0,\s*0,\s*0\s*\)|transparent/.test(c)) break;
+      c = ''; e = e.parentElement;
+    }
+    if(!c) c = getComputedStyle(document.body).backgroundColor;
+    if(c) rail.style.setProperty('--rail-bg', c);
+  }
+  function upd(){
+    if(!rail || !strip) return;
+    paintRail();
+    var max = strip.scrollWidth - strip.clientWidth;
+    rail.classList.toggle('can-l', strip.scrollLeft > 8);
+    rail.classList.toggle('can-r', max > 8 && strip.scrollLeft < max - 8);
+  }
+  function mkArrow(dir){
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'tools-arrow ' + dir;
+    b.setAttribute('aria-label', dir === 'r' ? 'Show more tools' : 'Show previous tools');
+    b.innerHTML = '<i aria-hidden="true">' + (dir === 'r' ? '\u203A' : '\u2039') + '</i>';
+    b.addEventListener('click', function(e){
+      e.preventDefault(); e.stopPropagation();
+      try{ strip.scrollBy({left:(dir === 'r' ? 1 : -1) * Math.round(strip.clientWidth * 0.7), behavior:'smooth'}); }catch(_){ strip.scrollLeft += (dir === 'r' ? 1 : -1) * 200; }
+      try{ if(navigator.vibrate) navigator.vibrate(5); }catch(_){}
+    });
+    return b;
+  }
+  function build(){
+    strip = document.querySelector('.bench-tools'); if(!strip || !strip.parentNode) return;
+    if(strip.parentNode.classList && strip.parentNode.classList.contains('tools-rail')){ rail = strip.parentNode; upd(); return; }
+    rail = document.createElement('div'); rail.className = 'tools-rail';
+    strip.parentNode.insertBefore(rail, strip); rail.appendChild(strip);
+    rail.appendChild(mkArrow('l')); rail.appendChild(mkArrow('r'));
+    strip.addEventListener('scroll', upd, {passive:true});
+    window.addEventListener('resize', upd);
+    window.addEventListener('orientationchange', function(){ setTimeout(upd, 250); });
+    try{ new MutationObserver(upd).observe(strip, {childList:true}); }catch(_){}
+    try{ new MutationObserver(paintRail).observe(document.documentElement, {attributes:true}); }catch(_){}
+    try{ if(window.ResizeObserver) new ResizeObserver(upd).observe(strip); }catch(_){}
+    upd();
+  }
+  /* One-time peek: nudges the strip sideways so a new user sees there is more to the right. */
+  function peek(){
+    if(!strip || !mq.matches) return;
+    try{ if(sessionStorage.getItem('apicPeek')) return; sessionStorage.setItem('apicPeek','1'); }catch(_){}
+    if(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches) return;
+    var touched = false; strip.addEventListener('pointerdown', function(){ touched = true; }, {once:true});
+    setTimeout(function(){
+      if(touched || strip.scrollLeft > 4) return;
+      try{ strip.scrollTo({left:72, behavior:'smooth'}); }catch(_){ return; }
+      setTimeout(function(){ if(!touched){ try{ strip.scrollTo({left:0, behavior:'smooth'}); }catch(_){} } }, 900);
+    }, 900);
+  }
+  /* Privacy note: tap to read the full text, tidy itself away after a few seconds on phones. */
+  function watchNote(){
+    var n = document.getElementById('apicPrivNote'); if(!n || n.__apicW) return; n.__apicW = 1;
+    var t = 0;
+    n.addEventListener('click', function(e){ if(e.target.tagName !== 'BUTTON'){ n.classList.toggle('open'); clearTimeout(t); } });
+    new MutationObserver(function(){
+      clearTimeout(t); n.classList.remove('open');
+      if(!n.hidden && mq.matches) t = setTimeout(function(){ if(!n.classList.contains('open')) n.hidden = true; }, 12000);
+    }).observe(n, {attributes:true, attributeFilter:['hidden']});
+  }
+  function init(){
+    build(); watchNote();
+    var seen = false;
+    function chk(){ if(!seen && document.body.classList.contains('studio-active')){ seen = true; upd(); peek(); } }
+    new MutationObserver(chk).observe(document.body, {attributes:true, attributeFilter:['class']}); chk();
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  window.addEventListener('load', function(){ setTimeout(function(){ build(); watchNote(); upd(); }, 900); });
+  /* Light haptic tick on taps (Android; iOS ignores it). */
+  document.addEventListener('click', function(e){
+    if(!coarse.matches || !navigator.vibrate) return;
+    var b = e.target.closest && e.target.closest('.tool-btn, #exportBtn, #removeImgBtn');
+    if(b){ try{ navigator.vibrate(6); }catch(_){} }
+  }, true);
 })();
 </script>
 </body>

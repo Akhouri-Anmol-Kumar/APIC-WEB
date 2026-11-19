@@ -1187,6 +1187,42 @@
   #apicTop:active{transform:translate3d(0,0,0) scale(.92);}
   #apicTop svg{width:18px; height:18px;}
 </style>
+<style id="apic-sel-css">
+  /* ---- Edit tab: Selection card + interactive floating preview ---- */
+  .sel-card{border:1px solid var(--line); border-radius:8px; padding:12px 12px 4px; margin:0 0 14px; background:color-mix(in srgb, var(--bg-2) 70%, transparent);}
+  .sel-head{display:flex; align-items:center; justify-content:space-between; gap:6px 12px; margin-bottom:10px; flex-wrap:wrap;}
+  .sel-head b{font-family:var(--mono); font-size:10.5px; letter-spacing:1px; text-transform:uppercase; color:var(--text);}
+  .sel-status{font-family:var(--mono); font-size:11px; color:var(--text-muted);}
+  .sel-status.has{color:var(--green);}
+  .sel-seg{display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-bottom:12px;}
+  .sel-seg button{padding:9px 6px; background:transparent; border:0; color:var(--text-muted); font-family:var(--sans); font-size:12px; cursor:pointer; min-height:36px;}
+  .sel-seg button + button{border-left:1px solid var(--line);}
+  .sel-seg button.on{background:var(--green); color:#04140c; font-weight:600;}
+  .sel-seg button:focus-visible{outline:2px solid var(--cyan); outline-offset:-2px;}
+  .sel-actions{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:11px;}
+  .sel-actions .btn{flex:1 1 120px; justify-content:center;}
+  .sel-card .hint{margin:0 0 8px;}
+  #apicDock canvas.ad-sel{position:absolute; left:0; top:0; pointer-events:none;}
+  #apicDock.sel .ad-img{cursor:crosshair; touch-action:none;}
+  #apicDock.on.pip.sel .ad-img{pointer-events:auto;}
+  #apicDock .ad-hint{display:none; text-transform:none; letter-spacing:.2px; font-weight:500; color:var(--green);}
+  #apicDock.sel .ad-hint{display:inline;}
+  #apicDock.pip .ad-hint{display:none;}
+  #apicDock .ad-tip{
+    display:none; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); max-width:86%; text-align:center; pointer-events:none;
+    padding:7px 11px; border-radius:8px; background:rgba(0,0,0,.72); color:#fff; font-family:var(--sans); font-size:12px; line-height:1.35;
+  }
+  #apicDock.pip .ad-tip{font-size:10px; padding:5px 8px;}
+  #apicDock .ad-act{
+    display:none; position:absolute; left:50%; bottom:6px; transform:translateX(-50%); gap:6px; z-index:2; white-space:nowrap;
+  }
+  #apicDock .ad-act button{
+    border:1px solid rgba(255,255,255,.25); border-radius:6px; padding:6px 11px; cursor:pointer; font-family:var(--sans); font-size:11.5px; font-weight:600;
+    background:var(--green); color:#04140c; box-shadow:0 4px 14px rgba(0,0,0,.45); min-height:28px;
+  }
+  #apicDock .ad-act button.ghost{background:rgba(0,0,0,.72); color:#fff; font-weight:500;}
+  #apicDock.pip .ad-act button{padding:4px 8px; font-size:10px; min-height:22px;}
+</style>
 <style id="apic-dock-css">
   /* ---------- Floating live preview dock (Advanced tab) ---------- */
   #drop{scroll-margin-top:calc(var(--apic-header) + 18px);}
@@ -1401,6 +1437,34 @@
             <button class="quick-btn" data-flip="h">⇋ Flip H</button>
             <button class="quick-btn" data-flip="v">⇵ Flip V</button>
           </div>
+          <div class="sel-card" id="selCard">
+            <div class="sel-head"><b>Select an area</b><span class="sel-status" id="selStatus" role="status" aria-live="polite">Nothing selected yet</span></div>
+            <div class="sel-seg" id="selPurposeSeg" role="group" aria-label="What to do with the selected area">
+              <button type="button" data-purpose="crop" class="on" aria-pressed="true">Crop</button>
+              <button type="button" data-purpose="hide" aria-pressed="false">Blur / pixelate</button>
+            </div>
+            <div id="selCropOpts">
+              <div class="row"><label for="cropRatio">Shape</label>
+                <select id="cropRatio"><option value="-1">Free drag…</option><option value="0">Free</option><option value="1">1:1 square</option><option value="0.8">4:5 portrait</option><option value="0.75">3:4</option><option value="1.3333">4:3</option><option value="1.7778">16:9 wide</option><option value="0.5625">9:16 story</option><option value="custom">Custom ratio…</option></select></div>
+              <div class="row" id="selCustomRow" style="display:none;"><label for="cropCW">Ratio</label>
+                <input type="number" id="cropCW" min="0.1" max="100" step="any" value="3" aria-label="Ratio width"><span class="val" style="min-width:12px;">:</span><input type="number" id="cropCH" min="0.1" max="100" step="any" value="2" aria-label="Ratio height"></div>
+            </div>
+            <div id="selHideOpts" style="display:none;">
+              <div class="row"><label for="regionMode">Effect</label>
+                <select id="regionMode"><option value="blur">Blur</option><option value="pixelate">Pixelate</option></select></div>
+              <div class="row"><label for="regionShape">Area shape</label>
+                <select id="regionShape"><option value="rect">Rectangle</option><option value="ellipse">Ellipse (good for faces)</option></select></div>
+              <div class="row"><label for="regionAmt">Strength</label>
+                <input type="range" id="regionAmt" min="1" max="100" value="60"><span class="val" id="regionAmtVal">60%</span></div>
+            </div>
+            <div class="sel-actions">
+              <button class="btn btn-ghost btn-sm" id="selToggle" type="button">Select area</button>
+              <button class="btn btn-ghost btn-sm" id="cropClearE" type="button">Clear</button>
+              <button class="btn btn-gold btn-sm" id="cropApplyE" type="button">Apply crop</button>
+              <button class="btn btn-gold btn-sm" id="regionApply" type="button" style="display:none;">Apply blur</button>
+            </div>
+            <p class="hint" id="selHint">Draw the box on the photo <b>or on the floating live preview</b> while you scroll. Drag its edges or corners to resize, drag inside to move. Blur and pixelate preview live inside the box. <b>Enter</b> applies, <b>Esc</b> clears.</p>
+          </div>
           <div class="row"><label>Filter</label>
             <select id="editFilter">
               <option value="none">None</option>
@@ -1433,16 +1497,6 @@
           <div class="row"><label>Saturation</label><input type="range" id="editSaturate" min="0" max="220" value="100"><span class="val" id="editSaturateVal">100%</span></div>
           <div class="row"><label>Blur</label><input type="range" id="editBlur" min="0" max="12" value="0" step="0.5"><span class="val" id="editBlurVal">0px</span></div>
           <div class="row"><label>Straighten</label><input type="range" id="editStraighten" min="-15" max="15" value="0" step="0.5"><span class="val" id="editStraightenVal">0°</span></div>
-          <div class="row"><label>Crop</label>
-            <select id="cropRatio"><option value="-1">Choose a shape…</option><option value="0">Free</option><option value="1">1:1 square</option><option value="0.8">4:5 portrait</option><option value="0.75">3:4</option><option value="1.3333">4:3</option><option value="1.7778">16:9 wide</option><option value="0.5625">9:16 story</option></select>
-            <button class="btn btn-ghost btn-sm" id="selToggle">Select area</button></div>
-          <div class="row"><button class="btn btn-ghost btn-sm" id="cropApplyE" style="flex:1;">Apply crop</button><button class="btn btn-ghost btn-sm" id="cropClearE" style="flex:1;">Clear selection</button></div>
-          <div class="row"><label>Hide area</label>
-            <select id="regionMode"><option value="blur">Blur</option><option value="pixelate">Pixelate</option></select>
-            <input type="range" id="regionAmt" min="1" max="100" value="60">
-            <button class="btn btn-ghost btn-sm" id="regionApply">Apply</button></div>
-          <p class="hint" style="margin-top:6px;">Crop and Hide area both use the selection: tap Select area (or pick a crop shape), then drag on the photo. Hide area blurs or pixelates faces, plates or text.</p>
-          <p class="hint" id="cropTips" style="margin-top:0;">Crop box: drag its edges or corners to resize, drag inside to move it, click outside to deselect. Enter applies the crop, Esc clears it. The thirds grid helps you compose.</p>
           <button class="btn btn-ghost btn-sm" id="resetEdit">Reset all</button>
         </div>
 
@@ -2557,7 +2611,8 @@
   var cropRect = null; // {x,y,w,h} in canvas pixel space
   var editSelecting = false, cropMoving = null, cropDrag = null, bgPainting = false, bgLast = null, viewSize = '';
   function bgTouchReady(){ return !!(bgSrcCanvas && originalImg && bgSrcCanvas.width === canvas.width && bgSrcCanvas.height === canvas.height); }
-  function cropRatioVal(){ var el = document.getElementById('cropRatio'); var r = el ? parseFloat(el.value) : 0; return (activeTool === 'edit' && r > 0) ? r : 0; }
+  function cropRatioNum(){ var el = document.getElementById('cropRatio'); if(!el) return 0; if(el.value === 'custom'){ var a = parseFloat(document.getElementById('cropCW').value), b = parseFloat(document.getElementById('cropCH').value); return (a > 0 && b > 0) ? Math.min(100, Math.max(0.01, a/b)) : 0; } return parseFloat(el.value); }
+  function cropRatioVal(){ var r = cropRatioNum(); return (activeTool === 'edit' && selPurpose === 'crop' && r > 0) ? r : 0; }
 
   /* ---- zoom / pan (pinch, buttons, Ctrl+wheel, hand tool, Space+drag) so brush work can be precise ---- */
   var view = {z:1, x:0, y:0}, handMode = false, spaceDown = false, gest = null, panDrag = null;
@@ -2650,7 +2705,7 @@
     if(!originalImg){ overlay.style.display = 'none'; return; }
     overlay.width = canvas.width; overlay.height = canvas.height;
     maskCanvas.width = canvas.width; maskCanvas.height = canvas.height;
-    maskBox = null;
+    maskBox = null; fxStamp++;
     overlay.style.left = canvas.offsetLeft + 'px';
     overlay.style.top = canvas.offsetTop + 'px';
     overlay.style.width = canvas.clientWidth + 'px';
@@ -2672,54 +2727,56 @@
       octx.drawImage(maskCanvas, 0, 0);
       octx.restore();
     } else if(activeTool === 'edit' && editSelecting && cropRect){
-      drawCropBox();
+      paintSelection(octx, pxMain(), overlay.width, overlay.height);
     }
+    if(activeTool === 'edit'){ if(selUI) selUI(); }
+    if(window.__apicDock && window.__apicDock.drawSel) window.__apicDock.drawSel();   // the floating preview mirrors the selection
   }
 
   /* ---- crop box: dimmed surround, rule-of-thirds grid, corner + edge handles, live size label ---- */
-  function pxPerScreen(){ var cw = (overlay.clientWidth || overlay.width) * (view ? view.z : 1); return cw ? overlay.width / cw : 1; }
-  function drawCropBox(){
-    var r = cropRect, k = pxPerScreen(), W = overlay.width, H = overlay.height;
+  function pxMain(){ var cw = (overlay.clientWidth || overlay.width) * (view ? view.z : 1); return cw ? overlay.width / cw : 1; }
+  function pxPerScreen(){ if(kOverride) return kOverride; var cw = (overlay.clientWidth || overlay.width) * (view ? view.z : 1); return cw ? overlay.width / cw : 1; }
+  function drawCropBox(g, k, W, H, o){
+    var r = cropRect; o = o || {};
+    k = k || pxPerScreen(); W = W || overlay.width; H = H || overlay.height;
     if(!r || r.w < 1 || r.h < 1) return;
-    octx.save();
-    octx.fillStyle = 'rgba(0,0,0,0.55)'; octx.fillRect(0, 0, W, H);
-    octx.clearRect(r.x, r.y, r.w, r.h);
-    // rule of thirds
-    octx.lineWidth = Math.max(0.75, 1 * k);
-    octx.strokeStyle = cropDrag ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.45)';
-    octx.beginPath();
-    for(var i = 1; i < 3; i++){
-      var gx = r.x + r.w * i / 3, gy = r.y + r.h * i / 3;
-      octx.moveTo(gx, r.y); octx.lineTo(gx, r.y + r.h);
-      octx.moveTo(r.x, gy); octx.lineTo(r.x + r.w, gy);
+    g.save();
+    if(o.dim !== false){ g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, 0, W, H); g.clearRect(r.x, r.y, r.w, r.h); }
+    if(o.grid !== false){
+      g.lineWidth = Math.max(0.75, 1 * k);
+      g.strokeStyle = cropDrag ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.45)';
+      g.beginPath();
+      for(var i = 1; i < 3; i++){
+        var gx = r.x + r.w * i / 3, gy = r.y + r.h * i / 3;
+        g.moveTo(gx, r.y); g.lineTo(gx, r.y + r.h);
+        g.moveTo(r.x, gy); g.lineTo(r.x + r.w, gy);
+      }
+      g.stroke();
     }
-    octx.stroke();
-    // frame
-    octx.strokeStyle = '#39ff9d'; octx.lineWidth = Math.max(1, 1.5 * k);
-    octx.strokeRect(r.x, r.y, r.w, r.h);
-    // corner brackets + edge-middle grips
+    if(o.dim === false){ g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = Math.max(2, 3 * k); g.strokeRect(r.x, r.y, r.w, r.h); }   // dark under-line keeps the frame visible on light photos
+    g.strokeStyle = '#39ff9d'; g.lineWidth = Math.max(1, 1.5 * k);
+    g.strokeRect(r.x, r.y, r.w, r.h);
     var t = Math.max(2, 4 * k), len = Math.min(20 * k, r.w / 3, r.h / 3), mid = Math.min(16 * k, r.w / 4, r.h / 4);
-    octx.strokeStyle = '#39ff9d'; octx.lineWidth = t; octx.lineCap = 'butt';
-    octx.beginPath();
-    var x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h, cx = r.x + r.w / 2, cy = r.y + r.h / 2, o = t / 2;
-    octx.moveTo(x0 - o, y0 + len); octx.lineTo(x0 - o, y0 - o); octx.lineTo(x0 + len, y0 - o);
-    octx.moveTo(x1 - len, y0 - o); octx.lineTo(x1 + o, y0 - o); octx.lineTo(x1 + o, y0 + len);
-    octx.moveTo(x0 - o, y1 - len); octx.lineTo(x0 - o, y1 + o); octx.lineTo(x0 + len, y1 + o);
-    octx.moveTo(x1 - len, y1 + o); octx.lineTo(x1 + o, y1 + o); octx.lineTo(x1 + o, y1 - len);
-    octx.moveTo(cx - mid / 2, y0 - o); octx.lineTo(cx + mid / 2, y0 - o);
-    octx.moveTo(cx - mid / 2, y1 + o); octx.lineTo(cx + mid / 2, y1 + o);
-    octx.moveTo(x0 - o, cy - mid / 2); octx.lineTo(x0 - o, cy + mid / 2);
-    octx.moveTo(x1 + o, cy - mid / 2); octx.lineTo(x1 + o, cy + mid / 2);
-    octx.stroke();
-    // live size label
+    g.strokeStyle = '#39ff9d'; g.lineWidth = t; g.lineCap = 'butt';
+    g.beginPath();
+    var x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h, cx = r.x + r.w / 2, cy = r.y + r.h / 2, ofs = t / 2;
+    g.moveTo(x0 - ofs, y0 + len); g.lineTo(x0 - ofs, y0 - ofs); g.lineTo(x0 + len, y0 - ofs);
+    g.moveTo(x1 - len, y0 - ofs); g.lineTo(x1 + ofs, y0 - ofs); g.lineTo(x1 + ofs, y0 + len);
+    g.moveTo(x0 - ofs, y1 - len); g.lineTo(x0 - ofs, y1 + ofs); g.lineTo(x0 + len, y1 + ofs);
+    g.moveTo(x1 - len, y1 + ofs); g.lineTo(x1 + ofs, y1 + ofs); g.lineTo(x1 + ofs, y1 - len);
+    g.moveTo(cx - mid / 2, y0 - ofs); g.lineTo(cx + mid / 2, y0 - ofs);
+    g.moveTo(cx - mid / 2, y1 + ofs); g.lineTo(cx + mid / 2, y1 + ofs);
+    g.moveTo(x0 - ofs, cy - mid / 2); g.lineTo(x0 - ofs, cy + mid / 2);
+    g.moveTo(x1 + ofs, cy - mid / 2); g.lineTo(x1 + ofs, cy + mid / 2);
+    g.stroke();
     if(r.w > 96 * k && r.h > 44 * k){
       var txt = Math.round(r.w) + ' \u00d7 ' + Math.round(r.h), fs = 11 * k;
-      octx.font = '600 ' + fs + 'px "JetBrains Mono", monospace'; octx.textBaseline = 'middle';
-      var tw = octx.measureText(txt).width, px = 6 * k, ph = 20 * k, lx = r.x + 8 * k, ly = r.y + 8 * k;
-      octx.fillStyle = 'rgba(0,0,0,0.7)'; octx.fillRect(lx, ly, tw + px * 2, ph);
-      octx.fillStyle = '#ffffff'; octx.fillText(txt, lx + px, ly + ph / 2 + 0.5 * k);
+      g.font = '600 ' + fs + 'px "JetBrains Mono", monospace'; g.textBaseline = 'middle';
+      var tw = g.measureText(txt).width, px = 6 * k, ph = 20 * k, lx = r.x + 8 * k, ly = r.y + 8 * k;
+      g.fillStyle = 'rgba(0,0,0,0.7)'; g.fillRect(lx, ly, tw + px * 2, ph);
+      g.fillStyle = '#ffffff'; g.fillText(txt, lx + px, ly + ph / 2 + 0.5 * k);
     }
-    octx.restore();
+    g.restore();
   }
   function cropMinSize(){ return Math.min(Math.max(8, 28 * pxPerScreen()), canvas.width, canvas.height); }
   // what is under the pointer: a handle (edge / corner), the inside of the box, or nothing
@@ -2890,54 +2947,178 @@
     });
     document.getElementById('bgFillColor').addEventListener('change', function(){ fillWith('color', this.value); });
   })();
-  /* ---- Edit tab: crop shapes + selection + blur / pixelate area ---- */
+  /* ---- Edit tab: selection (crop / blur / pixelate), shared by the photo AND the floating live preview ---- */
+  var selPurpose = 'crop', fxStamp = 0, fxPrev = { key: '', cv: null }, kOverride = 0, selUI = null;
+  function selEl(id){ return document.getElementById(id); }
+  function regionParams(){
+    return { mode: selEl('regionMode').value, amt: (parseInt(selEl('regionAmt').value, 10) || 60) / 100, shape: selEl('regionShape').value };
+  }
+  // Path of the hidden area (rectangle or ellipse) on any context that is in photo-pixel space.
+  function selPath(g, x, y, w, h){
+    g.beginPath();
+    if(selEl('regionShape').value === 'ellipse') g.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, Math.PI*2);
+    else g.rect(x, y, w, h);
+  }
+  // Builds the blurred / pixelated version of one region (s < 1 makes a cheaper copy for live preview).
+  // Blur uses edge-replicated padding, so a box touching the photo's border no longer fades to transparent there.
+  function makeRegionFx(x, y, w, h, mode, amt, s){
+    var big = Math.max(canvas.width, canvas.height), W = canvas.width, H = canvas.height;
+    var ow = Math.max(1, Math.round(w*s)), oh = Math.max(1, Math.round(h*s));
+    var out = document.createElement('canvas'); out.width = ow; out.height = oh;
+    var oc = out.getContext('2d');
+    if(mode === 'pixelate'){
+      var block = Math.max(3, Math.round(3 + amt*big/22));
+      var sw = Math.max(1, Math.ceil(w/block)), sh = Math.max(1, Math.ceil(h/block));
+      var t = document.createElement('canvas'); t.width = sw; t.height = sh;
+      var tc = t.getContext('2d'); tc.imageSmoothingEnabled = true; tc.drawImage(canvas, x, y, w, h, 0, 0, sw, sh);
+      oc.imageSmoothingEnabled = false; oc.drawImage(t, 0, 0, sw, sh, 0, 0, sw*block*s, sh*block*s);
+      return out;
+    }
+    var rad = Math.max(2, Math.round(2 + amt*big/45)), pad = Math.ceil(rad*2.5);
+    var tw = Math.max(1, Math.round((w + pad*2)*s)), th = Math.max(1, Math.round((h + pad*2)*s));
+    var b = document.createElement('canvas'); b.width = tw; b.height = th;
+    var g = b.getContext('2d');
+    var sx0 = Math.max(0, x - pad), sy0 = Math.max(0, y - pad), sx1 = Math.min(W, x + w + pad), sy1 = Math.min(H, y + h + pad);
+    var cw = sx1 - sx0, ch = sy1 - sy0, offX = (sx0 - (x - pad))*s, offY = (sy0 - (y - pad))*s, dw = cw*s, dh = ch*s;
+    g.drawImage(canvas, sx0, sy0, cw, ch, offX, offY, dw, dh);
+    var rm = tw - (offX + dw), bm = th - (offY + dh);
+    if(offX > 0.5) g.drawImage(canvas, sx0, sy0, 1, ch, 0, offY, offX, dh);
+    if(rm > 0.5)   g.drawImage(canvas, sx1 - 1, sy0, 1, ch, offX + dw, offY, rm, dh);
+    if(offY > 0.5) g.drawImage(b, 0, offY, tw, 1, 0, 0, tw, offY);
+    if(bm > 0.5)   g.drawImage(b, 0, offY + dh - 1, tw, 1, 0, offY + dh, tw, bm);
+    oc.filter = 'blur(' + (rad*s) + 'px)';
+    oc.drawImage(b, -pad*s, -pad*s);
+    oc.filter = 'none';
+    return out;
+  }
+  function selBox(){
+    var r = cropRect; if(!r) return null;
+    var x = Math.max(0, Math.round(r.x)), y = Math.max(0, Math.round(r.y));
+    var w = Math.min(canvas.width - x, Math.round(r.w)), h = Math.min(canvas.height - y, Math.round(r.h));
+    return (w < 2 || h < 2) ? null : { x: x, y: y, w: w, h: h };
+  }
+  function previewFx(){
+    var bx = selBox(); if(!bx) return null;
+    var p = regionParams(), s = Math.min(1, 640 / Math.max(bx.w, bx.h));
+    var key = [bx.x, bx.y, bx.w, bx.h, p.mode, p.amt, fxStamp, canvas.width, canvas.height].join('|');
+    if(fxPrev.key !== key) fxPrev = { key: key, cv: makeRegionFx(bx.x, bx.y, bx.w, bx.h, p.mode, p.amt, s), x: bx.x, y: bx.y, w: bx.w, h: bx.h, mode: p.mode };
+    return fxPrev;
+  }
+  // Paints the selection (crop dimming, or a live blur / pixelate preview) on ANY context in photo-pixel space.
+  function paintSelection(g, k, W, H){
+    var r = cropRect; if(!r || r.w < 1 || r.h < 1) return;
+    if(selPurpose === 'hide'){
+      var f = previewFx();
+      if(f){
+        g.save(); selPath(g, f.x, f.y, f.w, f.h); g.clip();
+        g.imageSmoothingEnabled = (f.mode !== 'pixelate');
+        g.drawImage(f.cv, f.x, f.y, f.w, f.h); g.restore();
+        if(selEl('regionShape').value === 'ellipse'){
+          g.save(); selPath(g, f.x, f.y, f.w, f.h);
+          g.lineWidth = Math.max(1, 2*k); g.strokeStyle = 'rgba(0,0,0,.55)'; g.stroke();
+          g.setLineDash([6*k, 4*k]); g.lineWidth = Math.max(1, 1.5*k); g.strokeStyle = '#ffffff'; g.stroke(); g.restore();
+        }
+      }
+      drawCropBox(g, k, W, H, { dim: false, grid: false });
+    } else drawCropBox(g, k, W, H, { dim: true, grid: true });
+  }
+  window.__apicSel = {
+    ok: function(){ return activeTool === 'edit' && !!originalImg; },
+    has: function(){ return !!(cropRect && cropRect.w >= 4 && cropRect.h >= 4); },
+    paint: function(g, k, W, H){ if(activeTool === 'edit' && cropRect) paintSelection(g, k, W, H); },
+    label: function(){ return selPurpose === 'hide' ? 'Apply ' + (selEl('regionMode').value === 'pixelate' ? 'pixelate' : 'blur') : 'Apply crop'; },
+    down: function(p, k, coarse){ kOverride = k; try{ if(!editSelecting) window.__apicSetSel(true); cropBegin(p, coarse); redrawOverlay(); } finally { kOverride = 0; } },
+    move: function(p, k){ if(!cropDrag) return; kOverride = k; try{ cropUpdate(p); redrawOverlay(); } finally { kOverride = 0; } },
+    up: function(k){ kOverride = k || 0; try{ pointerUp(); } finally { kOverride = 0; } },
+    hover: function(p, k){ kOverride = k; try{ var h = cropHit(p, false); return !h ? 'crosshair' : (h.mode === 'move' ? 'move' : CROP_CURSOR[h.h]); } finally { kOverride = 0; } },
+    apply: function(){ selEl(selPurpose === 'hide' ? 'regionApply' : 'cropApplyE').click(); },
+    clear: function(){ selEl('cropClearE').click(); },
+    invalidate: function(){ fxStamp++; if(activeTool === 'edit' && cropRect && selPurpose === 'hide') redrawOverlay(); }
+  };
   (function(){
-    var tog = document.getElementById('selToggle'), ratio = document.getElementById('cropRatio');
-    function setSel(v){ editSelecting = v; tog.textContent = v ? 'Done selecting' : 'Select area'; syncOverlay(); }
+    var tog = selEl('selToggle'), ratio = selEl('cropRatio'), stat = selEl('selStatus'), amt = selEl('regionAmt'), amtVal = selEl('regionAmtVal');
+    var segBtns = selEl('selPurposeSeg').querySelectorAll('button'), flashUntil = 0, flashT = 0;
+    function setText(el, t){ if(el.textContent !== t) el.textContent = t; }
+    function defaultBox(){
+      var W = canvas.width, H = canvas.height; if(!W || !H) return;
+      var r = (selPurpose === 'crop') ? Math.max(0, cropRatioNum()) : 0, w, h;
+      if(selPurpose === 'crop'){
+        if(r > 0){ w = Math.min(W*0.8, H*0.8*r); h = w/r; } else { w = W*0.8; h = H*0.8; }
+      } else { w = W*0.4; h = H*0.3; }
+      cropRect = { x: (W - w)/2, y: (H - h)/2, w: w, h: h };
+    }
+    function setSel(v){ editSelecting = v; syncOverlay(); updateSelUI(); }
     window.__apicSetSel = setSel;
-    document.addEventListener('apic:loaded', function(){ ratio.value = '-1'; });   // a new photo starts with no shape chosen (browsers can keep the old <select> value)
-    tog.addEventListener('click', function(){ setSel(!editSelecting); if(editSelecting) tog.blur(); });
+    function updateSelUI(){
+      var has = !!(cropRect && cropRect.w >= 4 && cropRect.h >= 4), hide = selPurpose === 'hide', ed = activeTool === 'edit';
+      if(Date.now() >= flashUntil){
+        var txt = !originalImg ? 'Open a photo first'
+          : has ? Math.round(cropRect.w) + ' × ' + Math.round(cropRect.h) + ' px · ' + Math.max(1, Math.round(cropRect.w*cropRect.h*100/(canvas.width*canvas.height))) + '% of photo'
+          : 'Nothing selected yet';
+        setText(stat, txt); stat.classList.toggle('has', has);
+      }
+      Array.prototype.forEach.call(segBtns, function(b){ var on = (b.dataset.purpose === selPurpose); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+      selEl('selCropOpts').style.display = hide ? 'none' : '';
+      selEl('selHideOpts').style.display = hide ? '' : 'none';
+      selEl('cropApplyE').style.display = hide ? 'none' : '';
+      var ra = selEl('regionApply'); ra.style.display = hide ? '' : 'none';
+      setText(ra, window.__apicSel.label());
+      selEl('cropApplyE').disabled = !has; ra.disabled = !has;
+      selEl('cropClearE').disabled = !has;
+      setText(tog, (editSelecting && has) ? 'Reset box' : 'Select area');
+      setText(amtVal, amt.value + '%');
+    }
+    selUI = updateSelUI;
+    function flash(msg){
+      setText(stat, msg); stat.classList.add('has'); flashUntil = Date.now() + 3200;
+      clearTimeout(flashT); flashT = setTimeout(function(){ flashUntil = 0; updateSelUI(); }, 3300);
+    }
+    function setPurpose(p){
+      if(p === selPurpose) return;
+      selPurpose = p;
+      if(editSelecting && cropRect && p === 'crop' && cropRatioNum() > 0){ ratio.dispatchEvent(new Event('change')); }
+      redrawOverlay(); updateSelUI();
+    }
+    Array.prototype.forEach.call(segBtns, function(b){ b.addEventListener('click', function(){ setPurpose(b.dataset.purpose); if(originalImg && activeTool === 'edit' && !cropRect){ setSel(true); defaultBox(); redrawOverlay(); } b.blur(); }); });
+    // Touching any Blur/Pixelate control with no area yet drops a ready-to-edit box, so the effect is visible straight away.
+    function ensureBox(){ if(!originalImg || activeTool !== 'edit' || selPurpose !== 'hide') return; if(!cropRect){ setSel(true); defaultBox(); } }
+    ['input', 'change'].forEach(function(ev){
+      ['regionAmt', 'regionMode', 'regionShape'].forEach(function(id){ selEl(id).addEventListener(ev, function(){ ensureBox(); redrawOverlay(); updateSelUI(); }); });
+    });
+    document.addEventListener('apic:loaded', function(){ ratio.value = '-1'; showCustom(); fxStamp++; updateSelUI(); });   // a new photo starts with no shape chosen (browsers can keep the old <select> value)
+    tog.addEventListener('click', function(){ setSel(true); defaultBox(); redrawOverlay(); updateSelUI(); tog.blur(); });
+    var customRow = selEl('selCustomRow'), cw = selEl('cropCW'), ch = selEl('cropCH');
+    function showCustom(){ customRow.style.display = (ratio.value === 'custom') ? '' : 'none'; }
+    ['input', 'change'].forEach(function(ev){ [cw, ch].forEach(function(inp){ inp.addEventListener(ev, function(){ if(ratio.value === 'custom' && cropRatioNum() > 0 && originalImg){ ratio.dispatchEvent(new Event('change')); } }); }); });
     ratio.addEventListener('change', function(){
-      var r = parseFloat(ratio.value);
-      if(r < 0) return;
+      showCustom();
+      var r = cropRatioNum();
+      if(r < 0 || (ratio.value === 'custom' && !(r > 0))) return;
       setSel(true);
       if(r > 0 && canvas.width){
         var w = Math.min(canvas.width, canvas.height*r), h = w/r;
         cropRect = { x: (canvas.width - w)/2, y: (canvas.height - h)/2, w: w, h: h };
       }
       redrawOverlay();
-      ratio.blur();
+      if(ratio.value !== 'custom') ratio.blur();
     });
-    document.getElementById('cropClearE').addEventListener('click', function(){ cropRect = null; redrawOverlay(); });
-    document.getElementById('cropApplyE').addEventListener('click', function(){
-      if(!cropRect || cropRect.w < 4 || cropRect.h < 4){ setSel(true); return; }
-      applyCropNow(); setSel(false);
+    selEl('cropClearE').addEventListener('click', function(){ cropRect = null; redrawOverlay(); updateSelUI(); });
+    selEl('cropApplyE').addEventListener('click', function(){
+      if(!cropRect || cropRect.w < 4 || cropRect.h < 4){ setSel(true); defaultBox(); redrawOverlay(); return; }
+      applyCropNow(); setSel(false); flash('✓ Cropped · Ctrl+Z to undo');
     });
-    document.getElementById('regionApply').addEventListener('click', function(){
+    selEl('regionApply').addEventListener('click', function(){
       if(!originalImg){ return; }
-      if(!cropRect || cropRect.w < 4 || cropRect.h < 4){ setSel(true); return; }
-      var x = Math.max(0, Math.round(cropRect.x)), y = Math.max(0, Math.round(cropRect.y));
-      var w = Math.min(canvas.width - x, Math.round(cropRect.w)), h = Math.min(canvas.height - y, Math.round(cropRect.h));
-      if(w < 2 || h < 2) return;
-      var amt = (parseInt(document.getElementById('regionAmt').value, 10) || 60)/100, mode = document.getElementById('regionMode').value;
-      var big = Math.max(canvas.width, canvas.height);
-      if(mode === 'pixelate'){
-        var block = Math.max(3, Math.round(3 + amt*big/22));
-        var sw = Math.max(1, Math.ceil(w/block)), sh = Math.max(1, Math.ceil(h/block));
-        var t = document.createElement('canvas'); t.width = sw; t.height = sh;
-        var tc = t.getContext('2d'); tc.imageSmoothingEnabled = true; tc.drawImage(canvas, x, y, w, h, 0, 0, sw, sh);
-        ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-        ctx.imageSmoothingEnabled = false; ctx.drawImage(t, 0, 0, sw, sh, x, y, sw*block, sh*block); ctx.restore();
-      } else {
-        var rad = Math.max(2, Math.round(2 + amt*big/45)), pad = Math.ceil(rad*2.5);
-        var t2 = document.createElement('canvas'); t2.width = w + pad*2; t2.height = h + pad*2;
-        var t2c = t2.getContext('2d'); t2c.filter = 'blur(' + rad + 'px)';
-        t2c.drawImage(canvas, x - pad, y - pad, w + pad*2, h + pad*2, 0, 0, w + pad*2, h + pad*2);
-        ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); ctx.drawImage(t2, x - pad, y - pad); ctx.restore();
-      }
-      cropRect = null; redrawOverlay();
+      var bx = selBox();
+      if(!cropRect || cropRect.w < 4 || cropRect.h < 4 || !bx){ setSel(true); defaultBox(); redrawOverlay(); return; }
+      var p = regionParams();
+      var fx = makeRegionFx(bx.x, bx.y, bx.w, bx.h, p.mode, p.amt, 1);
+      ctx.save(); selPath(ctx, bx.x, bx.y, bx.w, bx.h); ctx.clip(); ctx.drawImage(fx, bx.x, bx.y); ctx.restore();
+      cropRect = null; fxStamp++; redrawOverlay();
+      flash('✓ ' + (p.mode === 'pixelate' ? 'Pixelated' : 'Blurred') + ' · Ctrl+Z to undo');
       bakeToOriginal(function(){ render(); syncOverlay(); });
     });
+    updateSelUI();
   })();
   var lastPaintPt = null;
   // Brush size is in ON-SCREEN pixels, so it feels the same on a phone (big photo shrunk
@@ -3042,7 +3223,7 @@
   window.addEventListener('keydown', function(e){
     if(activeTool !== 'edit' || !editSelecting || !cropRect || e.isComposing) return;
     var tg = (e.target && e.target.tagName) || ''; if(/INPUT|TEXTAREA|SELECT|BUTTON/.test(tg) || (e.target && e.target.isContentEditable)) return;
-    if(e.key === 'Enter'){ e.preventDefault(); document.getElementById('cropApplyE').click(); }
+    if(e.key === 'Enter'){ e.preventDefault(); document.getElementById(selPurpose === 'hide' ? 'regionApply' : 'cropApplyE').click(); }
     else if(e.key === 'Escape'){ e.preventDefault(); cropRect = null; redrawOverlay(); }
   });
 
@@ -4448,7 +4629,7 @@
       toolTitle.textContent = titles[activeTool];
       if(activeTool === 'resize') syncResizeFields();
       if(activeTool === 'objremove' && window.prewarmInpaint) window.prewarmInpaint();
-      if(activeTool !== 'edit' && editSelecting){ editSelecting = false; document.getElementById('selToggle').textContent = 'Select area'; }
+      if(activeTool !== 'edit' && editSelecting){ editSelecting = false; cropRect = null; document.getElementById('selToggle').textContent = 'Select area'; }
       viewReset();
       syncOverlay();
     });
@@ -6061,13 +6242,13 @@
     el.setAttribute('role', 'button'); el.tabIndex = 0;
     el.setAttribute('aria-label', 'Live preview of your image. Drag to move it, use the arrow keys to nudge it, or activate to jump back to the image.');
     el.title = 'Drag to move · drag the corner to resize · click to jump back to the image';
-    el.innerHTML = '<div class="ad-img"><canvas aria-hidden="true"></canvas></div>' +
-      '<div class="ad-cap"><span class="ad-live"><span class="ad-grip" aria-hidden="true">⠿</span><i></i>Live preview</span>' +
+    el.innerHTML = '<div class="ad-img"><canvas class="ad-main" aria-hidden="true"></canvas><canvas class="ad-sel" aria-hidden="true"></canvas><div class="ad-tip" aria-hidden="true">Drag here to select an area</div><div class="ad-act"><button type="button" data-a="apply">Apply</button><button type="button" class="ghost" data-a="clear" title="Clear selection" aria-label="Clear selection">✕</button></div></div>' +
+      '<div class="ad-cap"><span class="ad-live"><span class="ad-grip" aria-hidden="true">⠿</span><i></i>Live preview<span class="ad-hint">&nbsp;· drag to select</span></span>' +
       '<span class="ad-right"><button type="button" class="ad-home" title="Back to default spot" aria-label="Reset preview position">↺</button><span class="ad-dim"></span><button type="button" class="ad-x" title="Hide the floating preview (turn it back on with the ◫ button in the title bar)" aria-label="Hide floating preview">×</button></span></div>' +
       '<button type="button" class="ad-rs" title="Drag to resize · double-click to reset size" aria-label="Resize preview: use the arrow keys, or drag"></button>';
     document.body.appendChild(el);
-    var imgBox = el.querySelector('.ad-img'), cv = el.querySelector('canvas'), dimEl = el.querySelector('.ad-dim'), homeBtn = el.querySelector('.ad-home'), xBtn = el.querySelector('.ad-x'), rsBtn = el.querySelector('.ad-rs');
-    var cx = cv.getContext('2d');
+    var imgBox = el.querySelector('.ad-img'), cv = el.querySelector('canvas.ad-main'), selCv = el.querySelector('canvas.ad-sel'), tipEl = el.querySelector('.ad-tip'), actEl = el.querySelector('.ad-act'), dimEl = el.querySelector('.ad-dim'), homeBtn = el.querySelector('.ad-home'), xBtn = el.querySelector('.ad-x'), rsBtn = el.querySelector('.ad-rs');
+    var cx = cv.getContext('2d'), selCx = selCv.getContext('2d'), selDirty = false, selRaf = 0, selSd = null, actApply = actEl.querySelector('[data-a=apply]');
     var mid = document.createElement('canvas'), mx = mid.getContext('2d');
     var header = document.querySelector('header.top');
     var on = false, g = null, lastKey = '', hideT = 0, drawRaf = 0, evalRaf = 0;
@@ -6180,9 +6361,16 @@
     function applyGeometry(){
       var n = geometry();
       g = n;
+      var selMode = (activeTool === 'edit');
+      if(el.classList.contains('sel') !== selMode){
+        el.classList.toggle('sel', selMode);
+        el.title = selMode ? 'Draw a box here to select an area · drag the caption bar to move this preview · drag the corner to resize' : 'Drag to move · drag the corner to resize · click to jump back to the image';
+        reqSel();
+      }
       var key = [n.left, n.top, n.w, n.h, n.iw, n.ih, n.side, n.shift, n.shiftR, n.moved, n.maxed].join('|');
       if(key === lastKey) return;
       lastKey = key;
+      reqSel();
       el.style.left = n.left + 'px'; el.style.top = n.top + 'px';
       el.style.width = n.w + 'px'; el.style.height = n.h + 'px';
       imgBox.style.width = n.iw + 'px'; imgBox.style.height = n.ih + 'px';
@@ -6337,7 +6525,7 @@
       if(evalRaf) return;
       evalRaf = requestAnimationFrame(function(){ evalRaf = 0; evaluate(); });
     }
-    function sync(){ if(on){ applyGeometry(); requestDraw(); } schedule(); }
+    function sync(){ if(on){ applyGeometry(); requestDraw(); } if(window.__apicSel) window.__apicSel.invalidate(); schedule(); }
 
     function jump(){ dropEl.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }); }
 
@@ -6400,6 +6588,7 @@
     });
     el.addEventListener('keydown', function(e){
       if(e.target !== el) return;
+      if(el.classList.contains('sel') && window.__apicSel && window.__apicSel.has() && (e.key === 'Enter' || e.key === 'Escape')) return;   // handled by the selection shortcuts
       if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); jump(); return; }
       var step = e.shiftKey ? 60 : 20, dx = 0, dy = 0;
       if(e.key === 'ArrowLeft') dx = -step; else if(e.key === 'ArrowRight') dx = step;
@@ -6410,6 +6599,58 @@
       e.preventDefault();
       userPos = clampPos(g.left + dx, g.top + dy, g.w, g.h, false); savePos();
       glide(); lastKey = ''; applyGeometry(); requestDraw();
+    });
+
+
+    /* ---- selection on the live preview: draw / move / resize the crop or blur box right here ---- */
+    function drawSel(){
+      selRaf = 0;
+      var S = window.__apicSel, ok = !!(on && g && S && S.ok());
+      var has = ok && S.has();
+      tipEl.style.display = (ok && !has) ? 'block' : 'none';
+      actEl.style.display = has ? 'flex' : 'none';
+      if(has){ var lb = S.label(); if(actApply.textContent !== lb) actApply.textContent = lb; }
+      if(!ok){ if(selDirty){ selCx.clearRect(0, 0, selCv.width, selCv.height); selDirty = false; } return; }
+      var dpr = Math.min(2, window.devicePixelRatio || 1);
+      var tw = Math.max(2, Math.round(g.iw * dpr)), th = Math.max(2, Math.round(g.ih * dpr));
+      if(selCv.width !== tw || selCv.height !== th){ selCv.width = tw; selCv.height = th; } else selCx.clearRect(0, 0, tw, th);
+      selCv.style.width = g.iw + 'px'; selCv.style.height = g.ih + 'px';
+      selCx.save(); selCx.scale(tw / canvas.width, th / canvas.height);
+      S.paint(selCx, canvas.width / Math.max(1, g.iw), canvas.width, canvas.height);
+      selCx.restore(); selDirty = true;
+    }
+    function reqSel(){ if(!selRaf) selRaf = requestAnimationFrame(drawSel); }
+    function selOK(){ var S = window.__apicSel; return !!(on && S && S.ok() && !el.classList.contains('leaving')); }
+    function selPt(e){
+      var r = imgBox.getBoundingClientRect();
+      return { p: { x: (e.clientX - r.left) / Math.max(1, r.width) * canvas.width, y: (e.clientY - r.top) / Math.max(1, r.height) * canvas.height }, k: canvas.width / Math.max(1, r.width) };
+    }
+    imgBox.addEventListener('pointerdown', function(e){
+      if(!selOK() || e.button > 0 || selSd) return;
+      e.preventDefault(); e.stopPropagation();                 // the image area edits the selection; the caption bar moves the card
+      var q = selPt(e); selSd = { id: e.pointerId, k: q.k };
+      try{ imgBox.setPointerCapture(e.pointerId); }catch(x){}
+      window.__apicSel.down(q.p, q.k, e.pointerType !== 'mouse');
+    });
+    imgBox.addEventListener('pointermove', function(e){
+      if(!selOK()) return;
+      var q = selPt(e);
+      if(selSd && e.pointerId === selSd.id){ e.preventDefault(); selSd.k = q.k; window.__apicSel.move(q.p, q.k); }
+      else if(!selSd && e.pointerType === 'mouse'){ imgBox.style.cursor = window.__apicSel.hover(q.p, q.k); }
+    });
+    function endSel(e){
+      if(!selSd || e.pointerId !== selSd.id) return;
+      var k = selSd.k; selSd = null;
+      try{ imgBox.releasePointerCapture(e.pointerId); }catch(x){}
+      window.__apicSel.up(k); reqSel();
+    }
+    imgBox.addEventListener('pointerup', endSel); imgBox.addEventListener('pointercancel', endSel);
+    imgBox.addEventListener('lostpointercapture', endSel);
+    ['pointerdown', 'click', 'dblclick'].forEach(function(n){ actEl.addEventListener(n, function(e){ e.stopPropagation(); }); });
+    actEl.addEventListener('click', function(e){
+      var b = e.target.closest && e.target.closest('button'); if(!b) return;
+      e.preventDefault();
+      if(b.dataset.a === 'apply') window.__apicSel.apply(); else window.__apicSel.clear();
     });
 
     /* ---- hide / turn off ---- */
@@ -6470,7 +6711,7 @@
     ['btnMin', 'btnClose', 'btnMax'].forEach(function(id){ var b = document.getElementById(id); if(b) b.addEventListener('click', function(){ lastKey = ''; schedule(); }); });
     minTab.addEventListener('click', function(){ lastKey = ''; schedule(); });
 
-    window.__apicDock = { evaluate: evaluate, sync: sync, setOff: setOff, isOff: function(){ return off; }, setWidth: function(w){ setW(w, false); }, state: function(){ return { on: on, off: off, userW: userW, g: g }; } };
+    window.__apicDock = { evaluate: evaluate, sync: sync, drawSel: reqSel, setOff: setOff, isOff: function(){ return off; }, setWidth: function(w){ setW(w, false); }, state: function(){ return { on: on, off: off, userW: userW, g: g }; } };
   })();
 
   updateGate();

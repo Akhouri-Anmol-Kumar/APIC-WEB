@@ -12931,5 +12931,85 @@ html:not([lang="en"]) body *{letter-spacing:normal!important}
   }, true);
 })();
 </script>
+<style id="apic-fix-css">
+/* ===== Fix + polish layer (loaded last) ===== */
+/* Sliders: a vertical swipe that starts on a slider must scroll the page. */
+input[type=range]{touch-action:pan-y}
+@media (pointer:coarse){
+  button,.btn,.tool-btn,summary,select,label,input[type=checkbox]{touch-action:manipulation}
+  input[type=range]{touch-action:pan-y}
+}
+/* Design Studio buttons: one consistent, scoped system */
+#dsApp .ds-ib,#dsApp .ds-btn,#dsApp .ds-pill,#dsApp .ds-fontbtn{
+  -webkit-appearance:none;appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  box-sizing:border-box;font:inherit;font-weight:500;line-height:1.2;text-align:center;white-space:nowrap;
+  background:var(--bg-3);color:var(--text);border:1px solid color-mix(in srgb,var(--text) 22%,transparent);border-radius:8px;
+  cursor:pointer;user-select:none;-webkit-user-select:none;text-shadow:none;box-shadow:none;
+  transition:background-color .15s ease,border-color .15s ease,color .15s ease,transform .08s ease,box-shadow .15s ease}
+#dsApp .ds-btn::before,#dsApp .ds-ib::before{content:none!important}
+#dsApp .ds-btn{padding:6px 12px}
+#dsApp .ds-ib{padding:6px 10px}
+#dsApp .ds-pill{border-radius:999px;padding:5px 12px}
+#dsApp .ds-ib:hover:not(:disabled),#dsApp .ds-btn:hover:not(:disabled),#dsApp .ds-pill:hover:not(:disabled){border-color:var(--green);color:var(--green);background:color-mix(in srgb,var(--green) 8%,var(--bg-3))}
+#dsApp .ds-ib:active:not(:disabled),#dsApp .ds-btn:active:not(:disabled),#dsApp .ds-pill:active:not(:disabled){transform:scale(.97)}
+#dsApp .ds-ib:disabled,#dsApp .ds-btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+#dsApp .ds-btn.on,#dsApp .ds-pill.on,#dsApp .ds-btn.ds-primary,#dsApp .ds-exportbtn{background:var(--green)!important;border-color:var(--green)!important;color:#04130a!important;-webkit-text-fill-color:#04130a;font-weight:600}
+#dsApp .ds-btn.on:hover:not(:disabled),#dsApp .ds-pill.on:hover:not(:disabled),#dsApp .ds-btn.ds-primary:hover:not(:disabled){color:#04130a!important;filter:brightness(1.07)}
+#dsApp .ds-btn.ds-danger{color:#e5484d;border-color:color-mix(in srgb,#e5484d 60%,transparent)}
+#dsApp .ds-btn.ds-danger:hover:not(:disabled){background:color-mix(in srgb,#e5484d 12%,var(--bg-3));border-color:#e5484d;color:#e5484d}
+html:not([data-theme="light"]) #dsApp .ds-btn.ds-danger{color:#ff8a8a}
+#dsApp .ds-btn.ds-sq{width:36px;min-width:36px;padding:0;font-size:16px}
+#dsApp .ds-btn.ds-mini{padding:2px 9px;min-height:28px;font-size:12.5px}
+#dsApp .ds-btn.ds-link{background:none!important;border:0;padding:2px 4px;text-decoration:underline;color:var(--green)}
+#dsApp .ds-btn.ds-link:hover:not(:disabled){background:none;filter:brightness(1.15)}
+#dsApp .ds-exportbtn{display:inline-flex;align-items:center;justify-content:center;border-radius:8px;padding:6px 18px}
+#dsApp .ds-ib:focus-visible,#dsApp .ds-btn:focus-visible,#dsApp .ds-pill:focus-visible,#dsApp .ds-tab:focus-visible,#dsApp .ds-exportbtn:focus-visible,#dsApp .ds-chip:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+#dsApp .ds-fontbtn{justify-content:space-between;text-align:left;width:100%}
+#dsApp .ds-zoom .ds-ib{border:0;background:none}
+#dsApp .ds-zoom .ds-ib:hover:not(:disabled){background:color-mix(in srgb,var(--green) 12%,transparent)}
+/* Tab strip: scroll instead of clipping the last tab */
+#dsApp .ds-tabs{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#dsApp .ds-tabs::-webkit-scrollbar{display:none}
+#dsApp .ds-tab{flex:none;white-space:nowrap;cursor:pointer;transition:color .15s ease}
+/* The toolbar "Design" chip must never inherit the round swatch size */
+.tool-btn.ds-chip{width:auto;height:auto;border-radius:var(--radius,10px);border:1px solid var(--line)}
+@media (prefers-reduced-motion:reduce){#dsApp .ds-ib,#dsApp .ds-btn,#dsApp .ds-pill{transition:none}#dsApp .ds-ib:active,#dsApp .ds-btn:active{transform:none}}
+/* Light polish: smoother scrolling, nicer selection, steadier focus */
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+::selection{background:color-mix(in srgb,var(--green) 35%,transparent)}
+input[type=range]{accent-color:var(--green)}
+</style>
+<script id="apic-slider-scroll-js">
+/* Scroll-first sliders on touch: a swipe that starts on a range input scrolls the page unless it is clearly horizontal. */
+(function(){
+  'use strict';
+  var st=null;
+  function isRange(t){return t&&t.tagName==='INPUT'&&t.type==='range';}
+  document.addEventListener('touchstart',function(e){
+    var t=e.target; if(!isRange(t)||e.touches.length!==1){st=null;return;}
+    var c=e.touches[0]; st={el:t,x:c.clientX,y:c.clientY,v:t.value,mode:null};
+  },{capture:true,passive:true});
+  document.addEventListener('touchmove',function(e){
+    if(!st) return; var c=e.touches[0]; if(!c) return;
+    var dx=c.clientX-st.x, dy=c.clientY-st.y;
+    if(!st.mode){
+      if(Math.abs(dx)<6&&Math.abs(dy)<6) return;
+      st.mode=Math.abs(dy)>Math.abs(dx)*1.1?'scroll':'drag';
+    }
+    if(st.mode==='scroll'&&st.el.value!==st.v){
+      st.el.value=st.v; st.el.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+  },{capture:true,passive:true});
+  function end(){
+    if(st&&st.mode==='scroll'&&st.el.value!==st.v){ st.el.value=st.v; st.el.dispatchEvent(new Event('input',{bubbles:true})); }
+    st=null;
+  }
+  document.addEventListener('touchend',end,{capture:true,passive:true});
+  document.addEventListener('touchcancel',end,{capture:true,passive:true});
+  /* Ranges ignore a drag that the browser handed to the page scroller */
+  document.addEventListener('pointercancel',function(){ if(st&&st.mode==='scroll'){ end(); } },true);
+})();
+</script>
 </body>
 </html>

@@ -6410,7 +6410,9 @@
       if(lite) dpr = Math.min(dpr, 1.5);
       var q = hqNext ? 'high' : 'low'; hqNext = false;     // quick while values are changing; one crisp pass when they stop
       var tw = Math.max(2, Math.min(g.side ? 1600 : 1000, Math.round(g.iw * dpr)));
+      if(!isFinite(tw) || tw < 2) tw = Math.max(2, Math.round(240 * dpr));
       var th = Math.max(2, Math.round(tw * canvas.height / canvas.width));
+      if(!isFinite(th) || th < 2) th = Math.max(2, Math.round(tw * 0.66));
       if(cv.width !== tw || cv.height !== th){ cv.width = tw; cv.height = th; } else { cx.clearRect(0, 0, tw, th); }
       var src = canvas;
       if(canvas.width > tw * 3){                     // two-step shrink keeps the thumbnail crisp, not aliased
@@ -6420,7 +6422,7 @@
         mx.drawImage(canvas, 0, 0, mw, mh); src = mid;
       }
       cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = q === 'high' ? 'high' : 'medium';
-      try{ cx.drawImage(src, 0, 0, tw, th); }catch(e){}
+      try{ cx.drawImage(src, 0, 0, tw, th); }catch(e){ try{ cx.drawImage(canvas, 0, 0, tw, th); }catch(e2){} }
       var LY = window.__apicLayers;                  // layers sit above the photo: show them in the live preview as well
       if(LY && LY.count() > 0){
         var kk = tw / canvas.width;
@@ -6432,6 +6434,10 @@
       var d = canvas.width + '×' + canvas.height;
       if(dimEl.textContent !== d) dimEl.textContent = d;
     }
+    var lateT = [];
+    function lateRedraw(){ lateT.forEach(clearTimeout); lateT = [120, 450, 1200, 2500].map(function(ms){ return setTimeout(function(){ if(on){ lastKey = ''; applyGeometry(); requestDraw(); } }, ms); }); }
+    document.addEventListener('apic:loaded', function(){ if(on) lateRedraw(); });
+    window.addEventListener('load', function(){ if(on) lateRedraw(); });
     function armSettle(){ clearTimeout(settleT); settleT = setTimeout(function(){ hqNext = true; if(!drawRaf) drawRaf = requestAnimationFrame(draw); }, 200); }
     function requestDraw(){ hqNext = false; armSettle(); if(!drawRaf) drawRaf = requestAnimationFrame(draw); }
 
@@ -6442,7 +6448,7 @@
       var s = canvas.getBoundingClientRect();
       if(!wasOn) el.style.transition = 'none';
       applyGeometry();
-      draw(); armSettle();
+      draw(); armSettle(); lateRedraw();
       el.classList.remove('leaving', 'fade');
       studio.classList.toggle('apic-docked-side', g.side);
       studio.parentElement.classList.toggle('apic-docked-side', g.side);

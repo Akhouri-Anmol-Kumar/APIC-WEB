@@ -6242,13 +6242,13 @@
     el.setAttribute('role', 'button'); el.tabIndex = 0;
     el.setAttribute('aria-label', 'Live preview of your image. Drag to move it, use the arrow keys to nudge it, or activate to jump back to the image.');
     el.title = 'Drag to move · drag the corner to resize · click to jump back to the image';
-    el.innerHTML = '<div class="ad-img"><canvas class="ad-main" aria-hidden="true"></canvas><canvas class="ad-sel" aria-hidden="true"></canvas><div class="ad-tip" aria-hidden="true">Drag here to select an area</div><div class="ad-act"><button type="button" data-a="apply">Apply</button><button type="button" class="ghost" data-a="clear" title="Clear selection" aria-label="Clear selection">✕</button></div></div>' +
+    el.innerHTML = '<div class="ad-img"><canvas class="ad-main" aria-hidden="true"></canvas><div class="ad-tip" aria-hidden="true">Drag here to select an area</div><div class="ad-act"><button type="button" data-a="apply">Apply</button><button type="button" class="ghost" data-a="clear" title="Clear selection" aria-label="Clear selection">✕</button></div></div>' +
       '<div class="ad-cap"><span class="ad-live"><span class="ad-grip" aria-hidden="true">⠿</span><i></i>Live preview<span class="ad-hint">&nbsp;· drag to select</span></span>' +
       '<span class="ad-right"><button type="button" class="ad-home" title="Back to default spot" aria-label="Reset preview position">↺</button><span class="ad-dim"></span><button type="button" class="ad-x" title="Hide the floating preview (turn it back on with the ◫ button in the title bar)" aria-label="Hide floating preview">×</button></span></div>' +
       '<button type="button" class="ad-rs" title="Drag to resize · double-click to reset size" aria-label="Resize preview: use the arrow keys, or drag"></button>';
     document.body.appendChild(el);
-    var imgBox = el.querySelector('.ad-img'), cv = el.querySelector('canvas.ad-main'), selCv = el.querySelector('canvas.ad-sel'), tipEl = el.querySelector('.ad-tip'), actEl = el.querySelector('.ad-act'), dimEl = el.querySelector('.ad-dim'), homeBtn = el.querySelector('.ad-home'), xBtn = el.querySelector('.ad-x'), rsBtn = el.querySelector('.ad-rs');
-    var cx = cv.getContext('2d'), selCx = selCv.getContext('2d'), selDirty = false, selRaf = 0, selSd = null, actApply = actEl.querySelector('[data-a=apply]');
+    var imgBox = el.querySelector('.ad-img'), cv = el.querySelector('canvas.ad-main'), tipEl = el.querySelector('.ad-tip'), actEl = el.querySelector('.ad-act'), dimEl = el.querySelector('.ad-dim'), homeBtn = el.querySelector('.ad-home'), xBtn = el.querySelector('.ad-x'), rsBtn = el.querySelector('.ad-rs');
+    var cx = cv.getContext('2d'), selDirty = false, selRaf = 0, selSd = null, actApply = actEl.querySelector('[data-a=apply]');
     var mid = document.createElement('canvas'), mx = mid.getContext('2d');
     var header = document.querySelector('header.top');
     var on = false, g = null, lastKey = '', hideT = 0, drawRaf = 0, evalRaf = 0;
@@ -6402,7 +6402,8 @@
         Math.max(0.05, s.width / g.w) + ',' + Math.max(0.05, s.height / g.h) + ')';
     }
 
-    function draw(){
+    function draw(){ try{ drawInner(); }catch(err){ showErr(err); } }
+    function drawInner(){
       drawRaf = 0;
       if(!g || !canvas.width || !canvas.height) return;
       var dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -6433,6 +6434,7 @@
       el.classList.toggle('alpha', dropEl.classList.contains('has-alpha'));
       var d = canvas.width + '×' + canvas.height;
       if(dimEl.textContent !== d) dimEl.textContent = d;
+      snapBase(); drawSel();
     }
     var lateT = [];
     function lateRedraw(){ lateT.forEach(clearTimeout); lateT = [120, 450, 1200, 2500].map(function(ms){ return setTimeout(function(){ if(on){ lastKey = ''; applyGeometry(); requestDraw(); } }, ms); }); }
@@ -6609,6 +6611,12 @@
 
 
     /* ---- selection on the live preview: draw / move / resize the crop or blur box right here ---- */
+    var baseCv = document.createElement('canvas'), baseCx = baseCv.getContext('2d');
+    function snapBase(){
+      if(baseCv.width !== cv.width || baseCv.height !== cv.height){ baseCv.width = cv.width; baseCv.height = cv.height; }
+      else baseCx.clearRect(0, 0, cv.width, cv.height);
+      baseCx.drawImage(cv, 0, 0);
+    }
     function drawSel(){
       selRaf = 0;
       var S = window.__apicSel, ok = !!(on && g && S && S.ok());
@@ -6616,15 +6624,18 @@
       tipEl.style.display = (ok && !has) ? 'block' : 'none';
       actEl.style.display = has ? 'flex' : 'none';
       if(has){ var lb = S.label(); if(actApply.textContent !== lb) actApply.textContent = lb; }
-      if(!ok){ if(selDirty){ selCx.clearRect(0, 0, selCv.width, selCv.height); selDirty = false; } return; }
-      var dpr = Math.min(2, window.devicePixelRatio || 1);
-      var tw = Math.max(2, Math.round(g.iw * dpr)), th = Math.max(2, Math.round(g.ih * dpr));
-      if(selCv.width !== tw || selCv.height !== th){ selCv.width = tw; selCv.height = th; } else selCx.clearRect(0, 0, tw, th);
-      selCv.style.width = g.iw + 'px'; selCv.style.height = g.ih + 'px';
-      selCx.save(); selCx.scale(tw / canvas.width, th / canvas.height);
-      S.paint(selCx, canvas.width / Math.max(1, g.iw), canvas.width, canvas.height);
-      selCx.restore(); selDirty = true;
+      if(!ok && !selDirty) return;
+      if(!cv.width || baseCv.width !== cv.width || baseCv.height !== cv.height) return;   // the next draw() will bring it in step
+      try{
+        cx.clearRect(0, 0, cv.width, cv.height); cx.drawImage(baseCv, 0, 0);               // clean image back, box removed
+        selDirty = false;
+        if(!ok) return;
+        cx.save(); cx.scale(cv.width / canvas.width, cv.height / canvas.height);
+        S.paint(cx, canvas.width / Math.max(1, g.iw), canvas.width, canvas.height);
+        cx.restore(); selDirty = true;
+      }catch(err){ showErr(err); }
     }
+    function showErr(err){ try{ console.error('APIC live preview:', err); tipEl.textContent = 'Preview error: ' + (err && err.message || err); tipEl.style.display = 'block'; }catch(x){} }
     function reqSel(){ if(!selRaf) selRaf = requestAnimationFrame(drawSel); }
     function selOK(){ var S = window.__apicSel; return !!(on && S && S.ok() && !el.classList.contains('leaving')); }
     function selPt(e){

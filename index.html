@@ -135,7 +135,7 @@
       "name": "How does the AI background remover work?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "APIC runs an AI segmentation model directly in your browser using WebAssembly. The first time you use it, the model downloads once (about 5 MB for Lite, 44 MB for Fast, or 176 MB for Maximum) and is cached on your device, so later runs start much faster and nothing is sent to a server."
+        "text": "APIC runs an AI segmentation model directly in your browser using WebAssembly. The first time you use it, the model downloads once (about 5 MB for Lite, 44 MB for Fast, 176 MB for Great accuracy, or 520 MB to 1 GB for the optional BiRefNet Best-quality model) and is cached on your device, so later runs start much faster and nothing is sent to a server."
       }
     },
     {
@@ -552,7 +552,22 @@
   window.__BG_MODELS = {
     max:  { mb: 176, size: 1024, norm: 'dis', url: 'https://huggingface.co/onnx-community/ISNet-ONNX/resolve/main/onnx/model.onnx' },
     fast: { mb: 44,  size: 1024, norm: 'dis', url: 'https://huggingface.co/onnx-community/ISNet-ONNX/resolve/main/onnx/model_quantized.onnx' },
-    lite: { mb: 5,   size: 320,  norm: 'u2',  url: 'https://huggingface.co/edgetools/u2netp/resolve/main/u2netp.onnx' }
+    lite: { mb: 5,   size: 320,  norm: 'u2',  url: 'https://huggingface.co/edgetools/u2netp/resolve/main/u2netp.onnx' },
+    // BiRefNet (MIT, 1024px) — best, slowest, heaviest. Rebuilt-for-WebGPU export (same maths; fp16 file keeps float32 I/O).
+    // The file is picked per device in bgPickBire(): fp16 520 MB (WebGPU + shader-f16) or fp32 1038 MB.
+    bire: { mb: 1038, size: 1024, norm: 'imagenet', gpu: true,
+            url: 'https://huggingface.co/wonfy/BiRefNet-ONNX-webgpu/resolve/main/onnx/model.onnx',
+            urlF16: 'https://huggingface.co/wonfy/BiRefNet-ONNX-webgpu/resolve/main/onnx/model_fp16.onnx', mbF16: 520 }
+  };
+  // Decide (on the main thread) which BiRefNet file/engine this device can use. Never changes the output size or skips work.
+  window.__bgPickBire = async function(){
+    var cfg = window.__BG_MODELS.bire, gpu = false, f16 = false;
+    try{
+      if(navigator.gpu){ var ad = await navigator.gpu.requestAdapter(); if(ad){ gpu = true; f16 = !!(ad.features && ad.features.has('shader-f16')); } }
+    }catch(e){ gpu = false; f16 = false; }
+    if(gpu && f16){ cfg.cur = { url: cfg.urlF16, mb: cfg.mbF16, gpu: true, f16: true }; }
+    else { cfg.cur = { url: cfg.url, mb: cfg.mb, gpu: gpu, f16: false }; }
+    return cfg.cur;
   };
   window.__bgSessions = {};
   window.__loadBgModel = function(tier, onProgress){
@@ -563,6 +578,7 @@
       ort.env.wasm.numThreads = 1;
       ort.env.wasm.proxy = false;
       var cfg = window.__BG_MODELS[tier];
+      if(cfg.gpu) throw new Error('BiRefNet needs the background engine (Web Worker) — not available here');
       var buf = await window.__apicFetchModel(cfg.url, cfg.mb*1e6, onProgress);
       return await ort.InferenceSession.create(buf, { executionProviders: ['wasm'], enableCpuMemArena: false, enableMemPattern: false });
     })();
@@ -846,7 +862,7 @@
   .studio.has-image .drop canvas#canvas{
     max-width:100%; width:auto; height:auto; border-radius:4px; flex:0 0 auto; align-self:center; object-fit:contain;
     max-height:var(--apic-img-max);
-    animation:apicImgIn .55s var(--ease-out) both;
+    animation:apicImgIn .55s var(--ease-out) backwards;
   }
   .studio.has-image #overlay{max-height:var(--apic-img-max);}
   .studio.has-image .drop.has-alpha canvas#canvas{
@@ -1139,7 +1155,7 @@
   /* desktop/tablet only: breathing room above the editor box while an image is open.
      Phones (<=600px) are frameless and keep their tight layout. */
   @media (min-width:601px){
-    body.studio-active .studio-wrap > .studio:not(.maximized){margin-top:2px;}
+    body.studio-active .studio-wrap > .studio:not(.maximized){margin-top:20px;}
   }
 
   @media (max-width:520px){
@@ -1338,17 +1354,6 @@
     .user-pill #userName{display:none;}
   }
   @media (max-width:400px){ .brand-word small{display:none;} }
-
-  .tb-right{display:flex;align-items:center;gap:10px;}
-  #dsOpenHeroTitle{display:none;}
-  @media (min-width:821px){
-    #dsOpenHeroTitle{
-      display:inline-flex; align-items:center; gap:6px;
-      padding:5px 11px; font-size:10.5px; white-space:nowrap;
-    }
-    #dsOpenHeroTitle small{font-size:9px; opacity:.85;}
-    .studio-wrap > .ds-hero{display:none;}
-  }
 </style>
 </head>
 <body>
@@ -1403,10 +1408,7 @@
           <button class="hist-btn" id="undoBtn" title="Undo (Ctrl+Z) — up to 39 steps on desktop, fewer on phones" disabled>↺</button>
           <button class="hist-btn" id="redoBtn" title="Redo (Ctrl+Y)" disabled>↻</button>
         </div>
-        <div class="tb-right">
-          <span class="tb-title" id="toolTitle">edit.exe</span>
-          <button type="button" class="btn btn-gold btn-sm" id="dsOpenHeroTitle"><span>Open Design Studio</span> <small>Templates &middot; fonts &middot; checks</small></button>
-        </div>
+        <span class="tb-title" id="toolTitle">edit.exe</span>
       </div>
 
       <div class="studio-body">
@@ -1622,7 +1624,8 @@
           <p class="hint" style="margin-top:0;">On-device AI cut-out for people, products, pets and objects, with edge refinement and colour-fringe removal. Output keeps your full resolution. Nothing is uploaded to any server.</p>
           <div class="row"><label>Quality</label>
             <select id="bgQuality">
-              <option value="max">Maximum accuracy — multi-pass, slower, 176 MB first download, PC recommended</option>
+              <option value="bire">BiRefNet — Best quality, slowest &amp; heaviest · 520 MB (GPU) to 1 GB first download · PC only</option>
+              <option value="max">Great accuracy — multi-pass, slower, 176 MB first download, PC recommended</option>
               <option value="fast">Fast — 44 MB first download</option>
               <option value="lite">Light — 5 MB, made for phones</option>
             </select>
@@ -1631,6 +1634,7 @@
           <span class="filesize" id="bgStatus" style="margin-left:10px;"></span>
           <div id="bgTouch" style="display:none; margin-top:14px;">
             <p class="hint" style="margin-top:0;">Touch up: paint on the photo to bring parts back or erase them (pinch or use the zoom buttons for precision). Then pick a new background in one click.</p>
+            <p class="hint" style="margin-top:0;">Added a sticker or speech bubble as a layer? This tab only cuts the <b>photo</b>. Open <b>Layers</b>, select that layer and use <b>Remove background</b> there.</p>
             <div class="row"><label>Brush</label>
               <select id="bgBrushMode"><option value="restore">Restore (bring back)</option><option value="erase">Erase</option></select>
               <input type="range" id="bgBrushSize" min="4" max="120" value="28"><span class="val" id="bgBrushSizeVal">28</span></div>
@@ -1728,7 +1732,7 @@
         <details class="faq-item"><summary>How do I remove the background from an image for free?</summary><p>Open APIC, drop in your photo, choose the Remove BG tab and press Remove. The AI cut-out runs on your device. Then fix any edges with the Restore or Erase brush, optionally pick a new background, and export a transparent PNG.</p></details>
         <details class="faq-item"><summary>Is APIC really free?</summary><p>Yes. APIC is a free online photo editor that runs in your browser. There are no paid tiers and no per-image credits. Every tool works without an account; signing in with Google is optional.</p></details>
         <details class="faq-item"><summary>Are my photos uploaded to a server?</summary><p>No. Editing, converting, compressing, resizing, background removal and object removal all run on your own device. Your images never leave your browser. Signing in is optional and only uses your name, email and photo for your account.</p></details>
-        <details class="faq-item"><summary>How does the AI background remover work?</summary><p>APIC runs an AI segmentation model directly in your browser using WebAssembly. The first time you use it, the model downloads once (about 5 MB for Lite, 44 MB for Fast, or 176 MB for Maximum) and is cached on your device, so later runs start much faster and nothing is sent to a server.</p></details>
+        <details class="faq-item"><summary>How does the AI background remover work?</summary><p>APIC runs an AI segmentation model directly in your browser using WebAssembly. The first time you use it, the model downloads once (about 5 MB for Lite, 44 MB for Fast, 176 MB for Great accuracy, or 520 MB to 1 GB for the optional BiRefNet Best-quality model) and is cached on your device, so later runs start much faster and nothing is sent to a server.</p></details>
         <details class="faq-item"><summary>Which image formats can I convert between?</summary><p>APIC converts between PNG, JPEG, WebP, BMP, ICO and PDF. Use PNG or WebP when you need to keep a transparent background after removing it.</p></details>
         <details class="faq-item"><summary>Can I compress an image to a specific file size?</summary><p>Yes. The Compress tool searches for the best quality that fits your target file size, so you can hit an upload limit without guessing quality settings.</p></details>
         <details class="faq-item"><summary>What can the Remove Object tool do?</summary><p>Paint over something you want gone, such as a person, sign or blemish, and an on-device AI inpainting model fills the area to match its surroundings. Larger or more complex areas work best with the Ultra engine on desktop-class devices.</p></details>
@@ -2255,6 +2259,31 @@
   dropEl.addEventListener('drop', function(e){ var f = e.dataTransfer.files[0]; if(f) loadImage(f); });
   fileInput.addEventListener('change', function(e){ if(e.target.files[0]) loadImage(e.target.files[0]); });
 
+  /* ---- Clipboard: Ctrl+V / Cmd+V anywhere on the page, or the Paste button (needed on phones) ---- */
+  function pastedFile(blob){
+    var ext = ((blob.type || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'png';
+    return (blob instanceof File && blob.name) ? blob : new File([blob], 'pasted-image.' + ext, { type: blob.type || 'image/png' });
+  }
+  function takePasted(blob){
+    var f = pastedFile(blob);
+    if(!originalImg){ loadImage(f); return; }
+    // A photo is already open: pasting adds the image as a new layer instead of throwing the photo away.
+    var LY = window.__apicLayers;
+    if(LY && LY.addFile){ try{ LY.openTab(); }catch(e){} LY.addFile(f); }
+  }
+  document.addEventListener('paste', function(e){
+    if(document.body.classList.contains('ds-open')) return;             // Design Studio has its own paste
+    var tg = e.target, tag = (tg && tg.tagName) || '';
+    if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
+    var cd = e.clipboardData; if(!cd) return;
+    var blob = null, items = cd.items || [], i;
+    for(i = 0; i < items.length && !blob; i++){ if(items[i].kind === 'file' && /^image\//.test(items[i].type)) blob = items[i].getAsFile(); }
+    if(!blob && cd.files){ for(i = 0; i < cd.files.length && !blob; i++){ if(/^image\//.test(cd.files[i].type)) blob = cd.files[i]; } }
+    if(!blob) return;
+    if(window.__apicLayers && window.__apicLayers.isOpen && window.__apicLayers.isOpen()) return;   // the Layers tab adds it as a layer itself
+    e.preventDefault(); takePasted(blob);
+  });
+
   // Phones: a 48-108MP photo as a canvas (plus the brush mask + overlay canvases) is
   // enough to get the tab killed. Mobile images are limited by BOTH a pixel count
   // (mobilePixelCap: 12.6MP normal / 8.4MP low-tier) AND a long-side limit (mobileSideCap,
@@ -2668,6 +2697,14 @@
     spaceDown = true; e.preventDefault();
   });
   window.addEventListener('keyup', function(e){ if(e.code === 'Space') spaceDown = false; });
+  window.addEventListener('keydown', function(e){
+    if(!zoomable() || e.ctrlKey || e.metaKey || e.altKey) return;
+    var tg = (e.target && e.target.tagName) || ''; if(/INPUT|TEXTAREA|SELECT/.test(tg) || (e.target && e.target.isContentEditable)) return;
+    var r = overlay.getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2;
+    if(e.key === '+' || e.key === '='){ e.preventDefault(); viewZoomAt(view.z*1.5, cx, cy); }
+    else if(e.key === '-' || e.key === '_'){ e.preventDefault(); viewZoomAt(view.z/1.5, cx, cy); }
+    else if(e.key === '0'){ e.preventDefault(); viewReset(); }
+  });
   function clientXY(e){ var t = e.touches ? e.touches[0] : e; return {x: t.clientX, y: t.clientY}; }
   function startGesture(e){
     e.preventDefault(); painting = false; cropping = false; cropMoving = null; cropDrag = null; bgPainting = false; panDrag = null;
@@ -5673,8 +5710,8 @@
   // Everything the worker needs, built from the very same functions (no duplicated code).
   var bgWorkerFns = [bgBox, bgResample, bgGuided, bgAreaDown, bgGuidedColor, bgMorph, bgCleanSpecks, bgFusionChannel, bgBuildAlpha, bgFinish];
   var bgWorkerGlue = '\n' +
-    'var ortReady = null, sessions = {};\n' +
-    'function loadOrt(){ if(!ortReady){ importScripts("https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.23.2/ort.min.js");\n' +
+    'var ortReady = null, sessions = {}, ORT_GPU = (self.name === "apic-gpu");\n' +
+    'function loadOrt(){ if(!ortReady){ importScripts("https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.23.2/" + (ORT_GPU ? "ort.webgpu.min.js" : "ort.min.js"));\n' +
     '  ort.env.wasm.wasmPaths = "https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.23.2/"; ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false; ortReady = true; } }\n' +
     'function normalise(o){\n' +
     '  var m = Float32Array.from(o.data), i, mn = Infinity, mx = -Infinity;\n' +
@@ -5689,8 +5726,16 @@
     '  try{\n' +
     '    if(d.type === "load"){\n' +
     '      loadOrt();\n' +
-    '      if(!sessions[d.tier]) sessions[d.tier] = await ort.InferenceSession.create(d.buf, { executionProviders: ["wasm"], enableCpuMemArena: false, enableMemPattern: false });\n' +
-    '      self.postMessage({ id: d.id, ok: true });\n' +
+    '      var epUsed = "wasm";\n' +
+    '      if(!sessions[d.tier]){\n' +
+    '        var bytes = new Uint8Array(d.buf);\n' +
+    '        if(ORT_GPU && d.gpu){\n' +
+    '          try{ sessions[d.tier] = await ort.InferenceSession.create(bytes, { executionProviders: ["webgpu"] }); epUsed = "webgpu"; }\n' +
+    '          catch(ge){ if(d.f16) throw ge; sessions[d.tier] = null; }\n' +
+    '        }\n' +
+    '        if(!sessions[d.tier]) sessions[d.tier] = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"], enableCpuMemArena: false, enableMemPattern: false });\n' +
+    '      }\n' +
+    '      self.postMessage({ id: d.id, ok: true, ep: epUsed });\n' +
     '    } else if(d.type === "infer"){\n' +
     '      var ses = sessions[d.tier], S = d.size;\n' +
     '      var feeds = {}; feeds[ses.inputNames[0]] = new ort.Tensor("float32", d.input, [1,3,S,S]);\n' +
@@ -5711,6 +5756,36 @@
     '};\n';
 
   var bgWorker = null, bgWorkerSeq = 0, bgWorkerCbs = {}, bgWorkerBroken = false;
+  var bgGpuWorker = null, bgGpuBroken = false, bgLoadedEp = {};
+  // Second, separate worker that carries the WebGPU-capable onnxruntime build (BiRefNet only).
+  // Kept apart so the existing CPU worker and its models are untouched.
+  function bgGetGpuWorker(){
+    if(bgGpuWorker || bgGpuBroken) return bgGpuWorker;
+    try{
+      var src = bgWorkerFns.map(function(f){ return f.toString(); }).join('\n') + bgWorkerGlue;
+      var gw = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })), { name: 'apic-gpu' });
+      bgGpuWorker = gw;
+      gw.onmessage = function(e){
+        var cb = bgWorkerCbs[e.data.id]; if(!cb) return;
+        if(e.data.progress){ if(cb.onProgress) cb.onProgress(e.data.progress); return; }
+        delete bgWorkerCbs[e.data.id];
+        if(e.data.ok) cb.resolve(e.data); else cb.reject(new Error(e.data.error || 'worker error'));
+      };
+      gw.onerror = function(ev){
+        var err = new Error('GPU worker crashed' + (ev && ev.message ? ': ' + ev.message : ''));
+        for(var k in bgWorkerCbs){ if(bgWorkerCbs[k].gpu){ bgWorkerCbs[k].reject(err); delete bgWorkerCbs[k]; } }
+        try{ gw.terminate(); }catch(x){} bgGpuWorker = null; bgGpuBroken = true; bgLoadedTiers.bire = false; delete bgLoadedEp.bire;
+      };
+    } catch(e){ bgGpuWorker = null; bgGpuBroken = true; }
+    return bgGpuWorker;
+  }
+  function bgGpuCall(msg, transfer){
+    return new Promise(function(resolve, reject){
+      var wk = bgGetGpuWorker(); if(!wk){ reject(new Error('no GPU worker')); return; }
+      msg.id = ++bgWorkerSeq; bgWorkerCbs[msg.id] = { resolve: resolve, reject: reject, gpu: true };
+      wk.postMessage(msg, transfer || []);
+    });
+  }
   function bgGetWorker(){
     if(bgWorker || bgWorkerBroken) return bgWorker;
     try{
@@ -5778,7 +5853,9 @@
     if(cfg.norm === 'u2'){ for(i=0; i<n; i++){ var q = d[i*4]; if(d[i*4+1] > q) q = d[i*4+1]; if(d[i*4+2] > q) q = d[i*4+2]; if(q > mxp) mxp = q; } }
     for(y=0; y<S; y++){ for(x=0; x<S; x++){
       i = y*S + (flip ? S-1-x : x); src = (y*S + x)*4;
-      if(cfg.norm === 'u2'){
+      if(cfg.norm === 'imagenet'){
+        input[i] = (d[src]/255 - 0.485)/0.229; input[n+i] = (d[src+1]/255 - 0.456)/0.224; input[2*n+i] = (d[src+2]/255 - 0.406)/0.225;
+      } else if(cfg.norm === 'u2'){
         input[i] = (d[src]/mxp - 0.485)/0.229; input[n+i] = (d[src+1]/mxp - 0.456)/0.224; input[2*n+i] = (d[src+2]/mxp - 0.406)/0.225;
       } else {
         input[i] = d[src]/255 - 0.5; input[n+i] = d[src+1]/255 - 0.5; input[2*n+i] = d[src+2]/255 - 0.5;
@@ -5795,7 +5872,7 @@
   // Run the model once (worker if possible, otherwise main thread).
   async function bgInfer(tier, session, cfg, input){
     if(session === 'worker'){
-      var r = await bgCall({ type: 'infer', tier: tier, size: cfg.size, input: input }, [input.buffer]);
+      var r = await (cfg.gpu ? bgGpuCall : bgCall)({ type: 'infer', tier: tier, size: cfg.size, input: input }, [input.buffer]);
       return { data: r.matte, w: r.w, h: r.h };
     }
     var S = cfg.size, tensor = new ort.Tensor('float32', input, [1, 3, S, S]), feeds = {}; feeds[session.inputNames[0]] = tensor;
@@ -5813,6 +5890,15 @@
   // Load a model into the worker (preferred) or the main thread.
   async function bgLoadSession(tier, onProgress){
     var buf = null;
+    if(window.__BG_MODELS[tier].gpu){
+      // BiRefNet: worker-only (a 1 GB model must never block or crash the page's main thread).
+      if(bgLoadedTiers[tier]) return 'worker';
+      var pick = await window.__bgPickBire();
+      if(!bgGetGpuWorker()) throw new Error('BiRefNet needs Web Workers, which are not available in this browser');
+      buf = await window.__apicFetchModel(pick.url, pick.mb*1e6, onProgress);
+      var lr = await bgGpuCall({ type: 'load', tier: tier, buf: buf, gpu: pick.gpu, f16: pick.f16 }, [buf]);
+      bgLoadedEp[tier] = lr.ep; bgLoadedTiers[tier] = true; return 'worker';
+    }
     if(bgGetWorker()){
       if(bgLoadedTiers[tier]) return 'worker';
       var cfg = window.__BG_MODELS[tier];
@@ -5891,13 +5977,18 @@
       var fctx = flat.getContext('2d'); fctx.fillStyle = '#ffffff'; fctx.fillRect(0, 0, W, H); fctx.drawImage(canvas, 0, 0);
 
       // ---- 1) segmentation (best model first, graceful fallbacks) ----
-      var matte = null, zoom = null, usedTier = null, tiers = (quality === 'max') ? ['max', 'fast', 'lite'] : (quality === 'fast' ? ['fast', 'lite'] : ['lite']);
+      var matte = null, zoom = null, usedTier = null, tiers = (quality === 'bire') ? ['bire', 'max', 'fast', 'lite'] : (quality === 'max') ? ['max', 'fast', 'lite'] : (quality === 'fast' ? ['fast', 'lite'] : ['lite']);
       for(var ti=0; ti<tiers.length && !matte; ti++){
         var tier = tiers[ti], cfg = window.__BG_MODELS[tier], mb = cfg.mb;
         try{
+          if(tier === 'bire'){ var bp = await window.__bgPickBire(); mb = bp.mb; }
           say('loading AI model (' + mb + ' MB, first time only)…');
           var session = await bgLoadSession(tier, function(pct){ say('downloading AI model ' + pct + '% (' + mb + ' MB, cached afterwards)'); });
-          var hq = (tier === 'max');
+          // BiRefNet: the extra mirrored + zoom passes are only run when the GPU engine is active (about 1 s each).
+          // On CPU a single pass is already slow, so it runs the one full-frame pass only — no quality is faked.
+          var onGpu = (tier === 'bire' && bgLoadedEp.bire === 'webgpu');
+          var hq = (tier === 'max' || onGpu);
+          if(tier === 'bire') say(onGpu ? 'BiRefNet running on your GPU…' : 'BiRefNet running on CPU — this can take several minutes…');
           // pass 1: whole frame (+ mirrored copy in max mode: test-time augmentation averages out model noise)
           say(hq ? 'analysing image (pass 1 of ' + (2) + ')…' : 'analysing image…');
           await bgYield();
@@ -5940,7 +6031,7 @@
         await bgYield();
         matte = await bgRunMediaPipe(flat);
       }
-      var hqFinal = (usedTier === 'max');
+      var hqFinal = (usedTier === 'max' || usedTier === 'bire');
 
       // ---- 2) refine at a working resolution, then apply at full resolution (in the worker) ----
       say('preparing edge refinement…');
@@ -6047,6 +6138,7 @@
         var c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(im, 0, 0); return c;
       } finally { URL.revokeObjectURL(url); }
     }
+    window.__apicRemoveBgCanvas = function(c, tier){ return removeBg(c, tier); };   // used by the Layers tab (remove background of one layer)
     async function subjectMatte(flat, tier){
       var cfg = window.__BG_MODELS[tier], ses = await bgLoadSession(tier, null);
       return { m: await bgInfer(tier, ses, cfg, bgPrepInput(flat, cfg, false)) };
@@ -6458,7 +6550,7 @@ colour-matched (Laplace seam field) and grain-matched to the surrounding photo.
 
 BACKGROUND REMOVAL runs the IS-Net (DIS, Apache-2.0) segmentation model fully
 on-device via onnxruntime-web (WebAssembly) — first use downloads the model
-(44 MB fast / 176 MB maximum, cached in the browser after that), no config
+(44 MB fast / 176 MB great accuracy / BiRefNet best, cached in the browser after that), no config
 needed. Google's MediaPipe person segmenter is kept only as an offline fallback.
 
 A NOTE ON "EXPORT GATED TO SIGNED-IN USERS" — this is a business-logic
@@ -6564,6 +6656,14 @@ COSTS AT SMALL SCALE: $0 across all of the above.
         '<div class="row"><label>Font</label><select id="lyF"><option value="Inter, system-ui, sans-serif">Sans</option><option value="Georgia, serif">Serif</option><option value="\'Courier New\', monospace">Mono</option><option value="Impact, Haettenschweiler, sans-serif">Impact</option><option value="\'Brush Script MT\', cursive">Script</option></select><input type="color" id="lyC" value="#ffffff" style="width:42px; height:30px; padding:0; border:none; background:none;"><label style="width:auto;"><input type="checkbox" id="lyBold" style="accent-color:var(--green);"> Bold</label></div>'+
         slider('lyS','Size',12,400,80)+'</div>'+
       slider('lyBr','Brightness',0,200,100)+slider('lyCo','Contrast',0,200,100)+slider('lySa','Saturation',0,200,100)+slider('lyHu','Hue',-180,180,0)+slider('lyBl','Blur',0,30,0,0.5)+
+      '<div class="lyr-sub" id="lyBgSub">Remove background · this layer only</div>'+
+      '<div id="lyBgBox">'+
+        slider('lyBgTol','Tolerance',1,150,40)+
+        '<div class="row"><label>Remove</label><select id="lyBgMode"><option value="conn">Outside area only (keeps inner colours)</option><option value="all">Every pixel of that colour</option></select></div>'+
+        '<div class="row"><label>Edges</label><label style="display:flex;align-items:center;gap:6px;flex:1;"><input type="checkbox" id="lyBgFringe" checked> Clean the halo around the edge</label></div>'+
+        '<div class="lyr-bar"><button class="quick-btn" id="lyBgAuto" title="Detects the background colour from the layer\'s edges and removes it">🪄 Remove background</button><button class="quick-btn" id="lyBgPick" title="Then click the colour you want gone, right on the canvas">🎯 Pick colour</button><button class="quick-btn" id="lyBgAI" title="On-device AI cuts out the main subject">✨ AI cut-out</button><button class="quick-btn" id="lyBgRestore" title="Bring the layer\'s original pixels back" disabled>↩ Restore</button></div>'+
+        '<p class="hint" id="lyBgMsg" role="status" aria-live="polite" style="margin-top:0;">Works on the selected layer only — your photo is never touched. Stickers and speech bubbles: use 🪄 first; if a colour is left, 🎯 pick it. Photos of people or objects: ✨ AI cut-out.</p>'+
+      '</div>'+
       '<div class="lyr-sub">Align to canvas</div>'+
       '<div class="lyr-bar sm"><button class="quick-btn" id="lyAlL">⇤ Left</button><button class="quick-btn" id="lyAlC">↔ Centre</button><button class="quick-btn" id="lyAlR">⇥ Right</button><button class="quick-btn" id="lyAlT">⤒ Top</button><button class="quick-btn" id="lyAlM">↕ Middle</button><button class="quick-btn" id="lyAlB">⤓ Bottom</button></div>'+
       '<div class="lyr-bar"><button class="quick-btn" id="lyFlipH">⇋ Flip H</button><button class="quick-btn" id="lyFlipV">⇵ Flip V</button><button class="quick-btn" id="lyRot">↻ Rotate 90°</button><button class="quick-btn" id="lyFit">Fit to canvas</button><button class="quick-btn" id="lyCenter">Centre</button><button class="quick-btn" id="lyReset">Reset layer</button><button class="quick-btn" id="lyUp">↑ Forward</button><button class="quick-btn" id="lyDown">↓ Backward</button><button class="quick-btn" id="lyDup">⧉ Duplicate</button><button class="quick-btn" id="lyMerge">Merge down</button><button class="quick-btn" id="lyDel">Delete</button></div>'+
@@ -6645,6 +6745,9 @@ COSTS AT SMALL SCALE: $0 across all of the above.
       H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh();
     },
     btns: function(){ btns(); },
+    isOpen: function(){ return open; },
+    openTab: function(){ if(!open && !tab.disabled) tab.click(); },
+    addFile: function(f){ addFile(f); },
     shift: function(dx, dy){ if(!L.length) return; L.forEach(function(l){ l.x += dx; l.y += dy; }); H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh(); }
   };
 
@@ -6732,7 +6835,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     addLayer(newLayer('Copy of photo', 'image', c));
   });
   document.addEventListener('paste', function(e){
-    if(!open || !e.clipboardData) return;
+    if(!open || !e.clipboardData || e.defaultPrevented) return;      // defaultPrevented: the main paste handler already took this image
     var tg = (e.target && e.target.tagName) || ''; if(tg === 'INPUT' || tg === 'TEXTAREA') return;
     var items = e.clipboardData.items || [];
     for(var i=0;i<items.length;i++){ if(items[i].type.indexOf('image/') === 0){ e.preventDefault(); addFile(items[i].getAsFile()); return; } }
@@ -6783,6 +6886,10 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     var tx = $('lyrTxt'); tx.style.display = (l && l.type==='text') ? '' : 'none';
     if(l && l.type==='text'){ $('lyT').value = l.t; $('lyF').value = l.tf; $('lyC').value = l.tc; $('lyBold').checked = l.tb; $('lyS').value = l.ts; $('lySV').textContent = l.ts + 'px'; }
     $('lyMerge').disabled = !l || idx(l.id) < 1;
+    var bgOK = !!l && l.type !== 'text';
+    $('lyBgSub').style.display = $('lyBgBox').style.display = bgOK ? '' : 'none';
+    $('lyBgRestore').disabled = bgBusyL || !(l && l.ob);
+    if(!bgOK) stopPick();
   }
   function refresh(){ renderList(); syncCtl(); btns(); redraw(); }
 
@@ -6826,6 +6933,163 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     drawLayer(g, b, true); drawLayer(g, a);
     var n = newLayer(b.name, 'image', m); n.blend = b.blend; L.splice(i-1, 2, n); sel = n.id;
   });
+  /* ---------- remove the background of the SELECTED layer (the photo underneath is never touched) ---------- */
+  var bgBusyL = false, pickOn = false;
+  function lyMsg(s){ var m = $('lyBgMsg'); if(m) m.textContent = s || ''; }
+  function lyBgBusy(v){ bgBusyL = v; ['lyBgAuto','lyBgPick','lyBgAI'].forEach(function(id){ $(id).disabled = v; }); var c = cur(); $('lyBgRestore').disabled = v || !(c && c.ob); }
+  function copyCv(src){ var c = mk(src.width, src.height); c.getContext('2d').drawImage(src, 0, 0); return c; }
+  function stopPick(){ pickOn = false; var b = $('lyBgPick'); if(b) b.classList.remove('on'); stage.style.cursor = ''; }
+  /* shift the layer's centre by (ox,oy) bitmap pixels, so cropping its bitmap never moves the artwork on the canvas */
+  function localOff(l, ox, oy){
+    var sx = l.s*(l.fh ? -1 : 1), sy = l.s*(l.fv ? -1 : 1), c = Math.cos(l.rot), s = Math.sin(l.rot);
+    l.x += sx*ox*c - sy*oy*s; l.y += sx*ox*s + sy*oy*c;
+  }
+  function trimTransparent(c){
+    var w = c.width, h = c.height, d = c.getContext('2d').getImageData(0, 0, w, h).data, x0 = w, y0 = h, x1 = -1, y1 = -1, x, y, row;
+    for(y = 0; y < h; y++){ row = y*w*4; for(x = 0; x < w; x++){ if(d[row + x*4 + 3] > 8){ if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y; } } }
+    if(x1 < 0) return null;
+    x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(w - 1, x1 + 1); y1 = Math.min(h - 1, y1 + 1);
+    var cw = x1 - x0 + 1, chh = y1 - y0 + 1;
+    if(cw === w && chh === h) return { c: c, ox: 0, oy: 0 };
+    var nc = mk(cw, chh); nc.getContext('2d').drawImage(c, x0, y0, cw, chh, 0, 0, cw, chh);
+    return { c: nc, ox: (x0 + cw/2) - w/2, oy: (y0 + chh/2) - h/2 };
+  }
+  /* most common colour along the layer's border (quantised), or null when the border is already mostly transparent */
+  function borderColour(d, w, h){
+    var cnt = {}, best = null, bestN = 0, tr = 0, tot = 0, x, y;
+    function add(i){
+      var p = i*4; tot++; if(d[p+3] < 16){ tr++; return; }
+      var k = (d[p] >> 4) | ((d[p+1] >> 4) << 4) | ((d[p+2] >> 4) << 8), o = cnt[k] || (cnt[k] = { n:0, r:0, g:0, b:0 });
+      o.n++; o.r += d[p]; o.g += d[p+1]; o.b += d[p+2]; if(o.n > bestN){ bestN = o.n; best = o; }
+    }
+    for(x = 0; x < w; x++){ add(x); add((h-1)*w + x); }
+    for(y = 1; y < h - 1; y++){ add(y*w); add(y*w + w - 1); }
+    if(!best || tr > tot*0.6) return null;
+    return [best.r/best.n, best.g/best.n, best.b/best.n];
+  }
+  /* Colour-to-transparent. connected=true flood-fills inwards from the layer's edges (and the clicked pixel), so a white
+     speech bubble keeps its white inside while the white around it goes. connected=false removes that colour everywhere.
+     Optional halo clean-up un-mixes the anti-aliased fringe pixels from the removed colour (colour-to-alpha). */
+  function cutColour(src, bg, tol, connected, seed, fringe){
+    var w = src.width, h = src.height, id = src.getContext('2d').getImageData(0, 0, w, h), d = id.data, n = w*h, t2 = tol*tol, rm = new Uint8Array(n), i, x, y, st = null, sp = 0;
+    function match(j){ var p = j*4; if(d[p+3] < 16) return true; var a = d[p] - bg[0], b = d[p+1] - bg[1], c = d[p+2] - bg[2]; return a*a + b*b + c*c <= t2; }
+    function push(j){ if(!rm[j] && match(j)){ rm[j] = 1; st[sp++] = j; } }
+    if(!connected){ for(i = 0; i < n; i++) if(match(i)) rm[i] = 1; }
+    else {
+      st = new Int32Array(n);
+      for(x = 0; x < w; x++){ push(x); push((h-1)*w + x); } for(y = 0; y < h; y++){ push(y*w); push(y*w + w - 1); }
+      if(seed >= 0) push(seed);
+      while(sp){ i = st[--sp]; x = i % w; y = (i/w) | 0; if(x > 0) push(i-1); if(x < w-1) push(i+1); if(y > 0) push(i-w); if(y < h-1) push(i+w); }
+    }
+    var gone = 0; for(i = 0; i < n; i++) if(rm[i]) gone++;
+    if(!gone) return null;
+    if(fringe){
+      var band = new Uint8Array(n), list = [], j, k;
+      for(y = 0; y < h; y++) for(x = 0; x < w; x++){
+        i = y*w + x; if(rm[i]) continue;
+        if((x > 0 && rm[i-1]) || (x < w-1 && rm[i+1]) || (y > 0 && rm[i-w]) || (y < h-1 && rm[i+w])){ band[i] = 1; list.push(i); }
+      }
+      var first = list.length;                                    // second ring: one more pixel outwards
+      for(k = 0; k < first; k++){ i = list[k]; x = i % w; y = (i/w) | 0;
+        if(x > 0 && !rm[i-1] && !band[i-1]){ band[i-1] = 2; list.push(i-1); } if(x < w-1 && !rm[i+1] && !band[i+1]){ band[i+1] = 2; list.push(i+1); }
+        if(y > 0 && !rm[i-w] && !band[i-w]){ band[i-w] = 2; list.push(i-w); } if(y < h-1 && !rm[i+w] && !band[i+w]){ band[i+w] = 2; list.push(i+w); } }
+      var solid2 = (tol*2)*(tol*2), out = [];                     // compute first, write after, so neighbours read untouched pixels
+      for(k = 0; k < list.length; k++){
+        i = list[k]; x = i % w; y = (i/w) | 0; var p = i*4, fr = 0, fg = 0, fb = 0, fc = 0, yy, xx, q, a, b, c;
+        for(yy = Math.max(0, y-4); yy <= Math.min(h-1, y+4); yy++) for(xx = Math.max(0, x-4); xx <= Math.min(w-1, x+4); xx++){
+          j = yy*w + xx; if(rm[j] || band[j]) continue; q = j*4; if(d[q+3] < 200) continue;
+          a = d[q] - bg[0]; b = d[q+1] - bg[1]; c = d[q+2] - bg[2]; if(a*a + b*b + c*c < solid2) continue;
+          fr += d[q]; fg += d[q+1]; fb += d[q+2]; fc++;
+        }
+        if(!fc){ a = d[p] - bg[0]; b = d[p+1] - bg[1]; c = d[p+2] - bg[2]; if(a*a + b*b + c*c <= t2*2.25) out.push(i, 0, 0, 0, 0); continue; }
+        var F0 = fr/fc, F1 = fg/fc, F2 = fb/fc, v0 = F0 - bg[0], v1 = F1 - bg[1], v2 = F2 - bg[2], den = v0*v0 + v1*v1 + v2*v2;
+        if(den < 1) continue;
+        var al = ((d[p] - bg[0])*v0 + (d[p+1] - bg[1])*v1 + (d[p+2] - bg[2])*v2)/den;
+        if(al >= 0.97) continue;
+        if(al < 0.05){ out.push(i, 0, 0, 0, 0); continue; }
+        var ia = 1/al;
+        out.push(i, Math.max(0, Math.min(255, (d[p] - (1-al)*bg[0])*ia)), Math.max(0, Math.min(255, (d[p+1] - (1-al)*bg[1])*ia)), Math.max(0, Math.min(255, (d[p+2] - (1-al)*bg[2])*ia)), Math.round(d[p+3]*al));
+      }
+      for(k = 0; k < out.length; k += 5){ var o = out[k]*4; d[o] = out[k+1]; d[o+1] = out[k+2]; d[o+2] = out[k+3]; d[o+3] = out[k+4]; }
+    }
+    for(i = 0; i < n; i++) if(rm[i]){ var o2 = i*4; d[o2] = d[o2+1] = d[o2+2] = d[o2+3] = 0; }
+    var oc = mk(w, h); oc.getContext('2d').putImageData(id, 0, 0); return oc;
+  }
+  function commitBg(l, out){
+    var t = trimTransparent(out);
+    if(!t){ lyMsg('Nothing was left — the tolerance is too high. Lower it (or tap ↩ Restore) and try again.'); return false; }
+    if(!l.ob) l.ob = l.bmp;
+    l.bmp = t.c; localOff(l, t.ox, t.oy); l.tx = (l.tx || 0) + t.ox; l.ty = (l.ty || 0) + t.oy; l._fb = null; l.v = (l.v || 0) + 1;
+    pushHist(); refresh(); return true;
+  }
+  function runColour(l, src, bg, seed){
+    var out = cutColour(src, bg, +$('lyBgTol').value, $('lyBgMode').value === 'conn', seed, $('lyBgFringe').checked);
+    if(!out){ lyMsg('Nothing matched that colour. Raise the tolerance, or tap 🎯 Pick colour and click the background yourself.'); return; }
+    if(commitBg(l, out)) lyMsg('✓ Background removed. Not perfect? Ctrl+Z, change the Tolerance, and run it again — or finish with 🎯 Pick colour.');
+  }
+  function bgTask(l, fn){
+    if(!l || l.type === 'text' || bgBusyL) return;
+    if(l.lock){ lyMsg('This layer is locked — unlock it first (🔒 in the list).'); return; }
+    lyBgBusy(true); lyMsg('Removing background…');
+    setTimeout(function(){ try{ fn(); }catch(err){ console.error('Layer background removal failed:', err); lyMsg('✕ Could not process this layer.'); } lyBgBusy(false); }, 30);
+  }
+  $('lyBgTol').addEventListener('input', function(){ $('lyBgTolV').textContent = this.value; });
+  $('lyBgTolV').textContent = $('lyBgTol').value;
+  $('lyBgAuto').addEventListener('click', function(){
+    stopPick();
+    bgTask(cur(), function(){
+      var l = cur(), src = copyCv(l.bmp), bg = borderColour(src.getContext('2d').getImageData(0, 0, src.width, src.height).data, src.width, src.height);
+      if(!bg){ lyMsg('This layer\'s edges are already transparent. Tap 🎯 Pick colour to choose what to remove, or ✨ AI cut-out.'); return; }
+      runColour(l, src, bg, -1);
+    });
+  });
+  $('lyBgPick').addEventListener('click', function(){
+    var l = cur(); if(!l || l.type === 'text' || bgBusyL) return;
+    if(l.lock){ lyMsg('This layer is locked — unlock it first (🔒 in the list).'); return; }
+    pickOn = !pickOn; this.classList.toggle('on', pickOn); stage.style.cursor = pickOn ? 'crosshair' : '';
+    lyMsg(pickOn ? 'Now click the colour you want removed, on the canvas. (Esc cancels.)' : '');
+  });
+  function pickPoint(e){
+    var l = cur(); if(!l || l.type === 'text'){ stopPick(); return; }
+    var p = pt(e), dx = p.x - l.x, dy = p.y - l.y, c = Math.cos(-l.rot), s = Math.sin(-l.rot), w = l.bmp.width, h = l.bmp.height;
+    var lx = ((dx*c - dy*s)/(l.s*(l.fh ? -1 : 1)) + w/2) | 0, ly = ((dx*s + dy*c)/(l.s*(l.fv ? -1 : 1)) + h/2) | 0;
+    if(lx < 0 || ly < 0 || lx >= w || ly >= h){ lyMsg('Click on the selected layer (the one with the dashed outline).'); return; }
+    var src = copyCv(l.bmp), px = src.getContext('2d').getImageData(lx, ly, 1, 1).data;
+    if(px[3] < 16){ lyMsg('That spot is already transparent — click a coloured spot.'); return; }
+    stopPick();
+    bgTask(l, function(){ runColour(l, src, [px[0], px[1], px[2]], ly*w + lx); });
+  }
+  var aiRun = 0, aiLive = false, aiLabel = $('lyBgAI').textContent;
+  function aiDone(){ aiLive = false; $('lyBgAI').textContent = aiLabel; lyBgBusy(false); }
+  $('lyBgAI').addEventListener('click', async function(){
+    if(aiLive){ aiRun++; aiDone(); lyMsg('Cancelled — your layer was not changed.'); return; }       // second tap = cancel (a stalled download never traps the buttons)
+    stopPick();
+    var l = cur(); if(!l || l.type === 'text' || bgBusyL) return;
+    if(l.lock){ lyMsg('This layer is locked — unlock it first (🔒 in the list).'); return; }
+    if(typeof window.__apicRemoveBgCanvas !== 'function'){ lyMsg('The AI engine is still loading — try again in a few seconds.'); return; }
+    var id = l.id, run = ++aiRun; lyBgBusy(true); aiLive = true;
+    this.disabled = false; this.textContent = '✕ Cancel';
+    lyMsg('Loading the AI model (downloaded once, then cached on your device)… tap Cancel to stop.');
+    try{
+      var out;
+      try{ out = await window.__apicRemoveBgCanvas(copyCv(l.bmp), coarse ? 'lite' : 'fast'); }
+      catch(e1){ if(run !== aiRun || (e1 && e1.apicCancelled)) throw e1; out = await window.__apicRemoveBgCanvas(copyCv(l.bmp), 'lite'); }
+      if(run !== aiRun) return;                                   // cancelled meanwhile: drop the result
+      var l2 = byId(id);
+      if(l2 && commitBg(l2, out)) lyMsg('✓ AI cut-out done. Ctrl+Z undoes it; ↩ Restore brings the original back.');
+    }catch(err){
+      if(run !== aiRun) return;
+      console.error('Layer AI cut-out failed:', err);
+      lyMsg('✕ ' + ((window.__apicModelErrMsg && window.__apicModelErrMsg(err)) || (err && err.message) || 'AI cut-out failed.') + ' Your layer was not changed.');
+    }finally{ if(run === aiRun) aiDone(); }
+  });
+  $('lyBgRestore').addEventListener('click', function(){
+    var l = cur(); if(!l || !l.ob || l.lock || bgBusyL) return;
+    localOff(l, -(l.tx || 0), -(l.ty || 0)); l.bmp = l.ob; l.ob = null; l.tx = 0; l.ty = 0; l._fb = null; l.v = (l.v || 0) + 1;
+    pushHist(); refresh(); lyMsg('Original layer restored.');
+  });
+  window.addEventListener('keydown', function(e){ if(open && pickOn && e.key === 'Escape'){ e.stopImmediatePropagation(); stopPick(); lyMsg(''); } }, true);
+
   $('lyUndo').addEventListener('click', function(){ if(window.__apicUndo) window.__apicUndo(); });
   $('lyRedo').addEventListener('click', function(){ if(window.__apicRedo) window.__apicRedo(); });
 
@@ -6864,6 +7128,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   }
   stage.addEventListener('pointerdown', function(e){
     if(!open || e.button > 0) return; e.preventDefault();
+    if(pickOn){ pickPoint(e); return; }
     var p = pt(e); ptrs[e.pointerId] = p;
     try{ stage.setPointerCapture(e.pointerId); }catch(x){}
     if(nptr() === 2 && drag && !drag.l.lock && !pinch){            // second finger → pinch to scale + twist to rotate
@@ -6956,7 +7221,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   function setOpen(v){
     open = v; panel.classList.toggle('show', v); tab.classList.toggle('active', v);
     if(v){ document.querySelectorAll('.bench-panel').forEach(function(p){ if(p !== panel) p.classList.remove('show'); }); toolTitle.textContent = 'layers.exe'; }
-    else { drag = null; pinch = null; ptrs = {}; }
+    else { drag = null; pinch = null; ptrs = {}; stopPick(); }
     refresh(); setTimeout(redraw, 700);
   }
   tab.addEventListener('click', function(){
@@ -11407,8 +11672,6 @@ var DSUI = (function () {
     var nav = document.querySelector('nav.top-links'); if (nav && !document.getElementById('dsOpenTop')) { var a = document.createElement('a'); a.href = '#design'; a.id = 'dsOpenTop'; a.textContent = 'Design Studio'; a.addEventListener('click', function (e) { e.preventDefault(); open(); }); nav.insertBefore(a, nav.firstChild); }
     var eb = document.querySelector('.studio-wrap .eyebrow'); if (eb && !document.getElementById('dsOpenHero')) { var w = document.createElement('div'); w.className = 'ds-hero'; var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-gold'; b.id = 'dsOpenHero'; b.innerHTML = '<span>Open Design Studio</span> <small>Templates · fonts · checks</small>'; b.addEventListener('click', function () { open(); }); w.appendChild(b); eb.parentNode.insertBefore(w, eb.nextSibling); }
     window.addEventListener('hashchange', function () { if (location.hash === '#design' && !S.open) open(); });
-    var th = document.getElementById('dsOpenHeroTitle');
-    if (th && !th.__wired) { th.__wired = true; th.addEventListener('click', function () { open(); }); }
   }
   function init(cfg) {
     build(); entryPoints(); TEMPLATE_URL = cfg || {};

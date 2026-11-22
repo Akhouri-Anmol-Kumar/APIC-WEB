@@ -1139,7 +1139,7 @@
   /* desktop/tablet only: breathing room above the editor box while an image is open.
      Phones (<=600px) are frameless and keep their tight layout. */
   @media (min-width:601px){
-    body.studio-active .studio-wrap > .studio:not(.maximized){margin-top:20px;}
+    body.studio-active .studio-wrap > .studio:not(.maximized){margin-top:2px;}
   }
 
   @media (max-width:520px){
@@ -1338,6 +1338,17 @@
     .user-pill #userName{display:none;}
   }
   @media (max-width:400px){ .brand-word small{display:none;} }
+
+  .tb-right{display:flex;align-items:center;gap:10px;}
+  #dsOpenHeroTitle{display:none;}
+  @media (min-width:821px){
+    #dsOpenHeroTitle{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:5px 11px; font-size:10.5px; white-space:nowrap;
+    }
+    #dsOpenHeroTitle small{font-size:9px; opacity:.85;}
+    .studio-wrap > .ds-hero{display:none;}
+  }
 </style>
 </head>
 <body>
@@ -1392,7 +1403,10 @@
           <button class="hist-btn" id="undoBtn" title="Undo (Ctrl+Z) — up to 39 steps on desktop, fewer on phones" disabled>↺</button>
           <button class="hist-btn" id="redoBtn" title="Redo (Ctrl+Y)" disabled>↻</button>
         </div>
-        <span class="tb-title" id="toolTitle">edit.exe</span>
+        <div class="tb-right">
+          <span class="tb-title" id="toolTitle">edit.exe</span>
+          <button type="button" class="btn btn-gold btn-sm" id="dsOpenHeroTitle"><span>Open Design Studio</span> <small>Templates &middot; fonts &middot; checks</small></button>
+        </div>
       </div>
 
       <div class="studio-body">
@@ -11393,6 +11407,8 @@ var DSUI = (function () {
     var nav = document.querySelector('nav.top-links'); if (nav && !document.getElementById('dsOpenTop')) { var a = document.createElement('a'); a.href = '#design'; a.id = 'dsOpenTop'; a.textContent = 'Design Studio'; a.addEventListener('click', function (e) { e.preventDefault(); open(); }); nav.insertBefore(a, nav.firstChild); }
     var eb = document.querySelector('.studio-wrap .eyebrow'); if (eb && !document.getElementById('dsOpenHero')) { var w = document.createElement('div'); w.className = 'ds-hero'; var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-gold'; b.id = 'dsOpenHero'; b.innerHTML = '<span>Open Design Studio</span> <small>Templates · fonts · checks</small>'; b.addEventListener('click', function () { open(); }); w.appendChild(b); eb.parentNode.insertBefore(w, eb.nextSibling); }
     window.addEventListener('hashchange', function () { if (location.hash === '#design' && !S.open) open(); });
+    var th = document.getElementById('dsOpenHeroTitle');
+    if (th && !th.__wired) { th.__wired = true; th.addEventListener('click', function () { open(); }); }
   }
   function init(cfg) {
     build(); entryPoints(); TEMPLATE_URL = cfg || {};

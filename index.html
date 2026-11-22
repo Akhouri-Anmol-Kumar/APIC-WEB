@@ -10384,6 +10384,11 @@ body.ds-open{overflow:hidden}
 .ds-toast.show{opacity:1;transform:translate(-50%,0)}.ds-toast.err{border-color:#ff5c5c}
 .ds-drophint{position:absolute;inset:12px;border:2px dashed var(--green);border-radius:12px;display:none;align-items:center;justify-content:center;background:#39ff9d14;pointer-events:none}.ds-drophint.show{display:flex}
 .ds-hero{margin:0 0 12px}
+.tb-right{display:flex; align-items:center; gap:12px; min-width:0;}
+.ds-hero.ds-hero-tb{margin:0;}
+.ds-tbbtn{display:inline-flex; align-items:center; gap:8px; padding:6px 12px; font-size:12px; line-height:1.2; white-space:nowrap;}
+.ds-tbbtn small{font-size:10px; opacity:.85; font-weight:500;}
+@media (max-width:820px){ .ds-tbbtn small{display:none;} }
 @media (max-width:820px){
  .ds-hide-sm{display:none!important}
  .ds-main{flex-direction:column}
@@ -11670,7 +11675,16 @@ var DSUI = (function () {
   }
   function entryPoints() {
     var nav = document.querySelector('nav.top-links'); if (nav && !document.getElementById('dsOpenTop')) { var a = document.createElement('a'); a.href = '#design'; a.id = 'dsOpenTop'; a.textContent = 'Design Studio'; a.addEventListener('click', function (e) { e.preventDefault(); open(); }); nav.insertBefore(a, nav.firstChild); }
-    var eb = document.querySelector('.studio-wrap .eyebrow'); if (eb && !document.getElementById('dsOpenHero')) { var w = document.createElement('div'); w.className = 'ds-hero'; var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-gold'; b.id = 'dsOpenHero'; b.innerHTML = '<span>Open Design Studio</span> <small>Templates · fonts · checks</small>'; b.addEventListener('click', function () { open(); }); w.appendChild(b); eb.parentNode.insertBefore(w, eb.nextSibling); }
+    var tbar = document.querySelector('.studio .title-bar'), eb = document.querySelector('.studio-wrap .eyebrow');
+    if (!document.getElementById('dsOpenHero') && (tbar || eb)) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-gold ds-tbbtn'; b.id = 'dsOpenHero';
+      b.innerHTML = '<span>Open Design Studio</span> <small>Templates · fonts · checks</small>'; b.addEventListener('click', function () { open(); });
+      var w = document.createElement('div'); w.className = 'ds-hero'; w.appendChild(b);
+      if (tbar) {   // sits in the studio's title bar, right of the tool name (EDIT.EXE)
+        var tt = document.getElementById('toolTitle'), grp = document.createElement('div'); grp.className = 'tb-right';
+        tbar.appendChild(grp); if (tt) grp.appendChild(tt); grp.appendChild(w); w.className = 'ds-hero ds-hero-tb';
+      } else eb.parentNode.insertBefore(w, eb.nextSibling);
+    }
     window.addEventListener('hashchange', function () { if (location.hash === '#design' && !S.open) open(); });
   }
   function init(cfg) {

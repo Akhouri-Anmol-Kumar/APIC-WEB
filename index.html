@@ -1344,6 +1344,28 @@
   }
 </style>
 
+<style id="apic-overflow-fix-css">
+  /* title bar must never be wider than the screen (before an image is opened) */
+  .title-bar{min-width:0; flex-wrap:wrap; row-gap:8px;}
+  .tb-left{min-width:0; flex-wrap:nowrap;}
+  .tb-right{max-width:100%; flex:0 1 auto;}
+  .ds-hero.ds-hero-tb{min-width:0; max-width:100%;}
+  @media (max-width:560px){
+    .title-bar{padding-left:10px; padding-right:10px; gap:8px;}
+    .tb-left{gap:8px;}
+    .tb-left .tb-title{display:none;}            /* "apic@studio ~ %" is decoration; frees room for the buttons */
+    .tb-right{margin-left:auto; gap:8px;}
+    .ds-tbbtn{padding:6px 10px; font-size:11px; max-width:100%; overflow:hidden; text-overflow:ellipsis;}
+  }
+</style>
+<style id="apic-gap-fix-css">
+  /* phones: when the header slides away, the pinned preview slides up to the top edge (no empty gap) */
+  @media (max-width:899px){
+    .studio.has-image .studio-body > #drop{transition:top .28s cubic-bezier(.3,.7,.3,1);}
+    html.apic-motion.apic-hdr-hidden .studio.has-image .studio-body > #drop{top:0;}
+  }
+  @media (prefers-reduced-motion:reduce){ .studio.has-image .studio-body > #drop{transition:none;} }
+</style>
 <style id="apic-header-css">
   .top-inner{padding:8px 22px; gap:14px;}
   /* nav links only when there is genuinely room */
@@ -1468,6 +1490,20 @@
               <button class="btn btn-gold btn-sm" id="regionApply" type="button" style="display:none;">Apply blur</button>
             </div>
             <p class="hint" id="selHint">Draw the box right on the photo. Drag its edges or corners to resize, drag inside to move. Blur and pixelate preview live inside the box. <b>Enter</b> applies, <b>Esc</b> clears.</p>
+          </div>
+          <div class="sel-card" id="bdrCard">
+            <div class="sel-head"><b>Border</b><span class="sel-status" id="bdrStatus" role="status" aria-live="polite">Frame the whole photo</span></div>
+            <div class="row"><label for="bdrWidth">Thickness</label>
+              <input type="range" id="bdrWidth" min="1" max="30" value="6"><span class="val" id="bdrWidthVal">6%</span></div>
+            <div class="row"><label for="bdrColor">Colour</label>
+              <input type="color" id="bdrColor" value="#ffffff" aria-label="Border colour">
+              <select id="bdrPos" aria-label="Border position"><option value="out">Outside (adds space)</option><option value="in">Inside (over edges)</option></select></div>
+            <div class="row"><label for="bdrRound">Corners</label>
+              <input type="range" id="bdrRound" min="0" max="50" value="0"><span class="val" id="bdrRoundVal">0%</span></div>
+            <div class="sel-actions">
+              <button class="btn btn-gold btn-sm" id="bdrApply" type="button">Add border</button>
+            </div>
+            <p class="hint">Thickness is a % of the shorter side. Rounded corners turn the outer corners transparent. Ctrl+Z undoes it.</p>
           </div>
           <div class="row"><label>Filter</label>
             <select id="editFilter">
@@ -3159,6 +3195,44 @@
       bakeToOriginal(function(){ render(); syncOverlay(); });
     });
     updateSelUI();
+  })();
+
+  /* ---------------- Border: frame the whole photo ---------------- */
+  (function(){
+    var $b = function(id){ return document.getElementById(id); };
+    var wR = $b('bdrWidth'), rR = $b('bdrRound'), btn = $b('bdrApply'), st = $b('bdrStatus');
+    if(!wR || !btn) return;
+    function lab(){ $b('bdrWidthVal').textContent = wR.value + '%'; $b('bdrRoundVal').textContent = rR.value + '%'; }
+    wR.addEventListener('input', lab); rR.addEventListener('input', lab); lab();
+    function rrPath(c, x, y, w, h, r){
+      r = Math.min(r, w/2, h/2); c.beginPath();
+      c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+      c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+    }
+    btn.addEventListener('click', function(){
+      if(!originalImg){ st.textContent = 'Open a photo first'; return; }
+      render();
+      var cw = canvas.width, ch = canvas.height, pos = $b('bdrPos').value, col = $b('bdrColor').value;
+      var b = Math.max(1, Math.round(Math.min(cw, ch) * (parseInt(wR.value, 10) || 1) / 100));
+      var out = pos === 'out', W = out ? cw + 2*b : cw, H = out ? ch + 2*b : ch;
+      var t = document.createElement('canvas'); t.width = W; t.height = H;
+      var c = t.getContext('2d');
+      var r = Math.round(Math.min(W, H) * (parseInt(rR.value, 10) || 0) / 100);
+      c.save();
+      if(r > 0){ rrPath(c, 0, 0, W, H, r); c.clip(); }
+      if(out){
+        c.fillStyle = col; c.fillRect(0, 0, W, H);
+        c.drawImage(canvas, b, b);
+      } else {
+        c.drawImage(canvas, 0, 0);
+        c.fillStyle = col; c.beginPath(); c.rect(0, 0, W, H); c.rect(b, b, W - 2*b, H - 2*b); c.fill('evenodd');
+      }
+      c.restore();
+      canvas.width = W; canvas.height = H;
+      ctx.clearRect(0, 0, W, H); ctx.drawImage(t, 0, 0);
+      st.textContent = '✓ Border added · Ctrl+Z to undo';
+      bakeToOriginal(function(){ render(); syncOverlay(); });
+    });
   })();
   var lastPaintPt = null;
   // Brush size is in ON-SCREEN pixels, so it feels the same on a phone (big photo shrunk
@@ -7563,9 +7637,9 @@ COSTS AT SMALL SCALE: $0 across all of the above.
       if(Math.abs(p - lastBar) > 0.002){ bar.style.transform = 'scaleX(' + p.toFixed(4) + ')'; lastBar = p; }
       var dy = y - lastY;
       if(header){
-        if(y < 80){ if(hidden){ header.classList.remove('apic-hide'); hidden = false; } }
-        else if(dy > 10 && !hidden){ header.classList.add('apic-hide'); hidden = true; }
-        else if(dy < -6 && hidden){ header.classList.remove('apic-hide'); hidden = false; }
+        if(y < 80){ if(hidden){ header.classList.remove('apic-hide'); de.classList.remove('apic-hdr-hidden'); hidden = false; } }
+        else if(dy > 10 && !hidden){ header.classList.add('apic-hide'); de.classList.add('apic-hdr-hidden'); hidden = true; }
+        else if(dy < -6 && hidden){ header.classList.remove('apic-hide'); de.classList.remove('apic-hdr-hidden'); hidden = false; }
       }
       if(Math.abs(dy) > 6) lastY = y;
       var wantTop = y > 700 && dy < 0 || (topShown && y > 700);   // appears when scrolling up, stays while away from the top
@@ -7605,7 +7679,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
       var on = fast && !(rm && rm.matches);
       de.classList.toggle('apic-motion', on);
       active = on;
-      if(!on){ header && header.classList.remove('apic-hide'); hidden = false; top.classList.remove('show'); topShown = false; }
+      if(!on){ header && header.classList.remove('apic-hide'); de.classList.remove('apic-hdr-hidden'); hidden = false; top.classList.remove('show'); topShown = false; }
       else { measure(); lastY = window.pageYOffset || 0; frame(); }
     }
     evaluate();

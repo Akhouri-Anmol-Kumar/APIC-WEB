@@ -6818,6 +6818,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   #lyrCtl.off{display:none;}
   .lyr-empty{padding:12px; font-size:12.5px; color:var(--text-muted); text-align:center; border-bottom:1px solid var(--line);}
   #lyrTxt input[type=text]{flex:1; min-width:120px;}
+  #lyrTxt textarea{font-family:inherit; line-height:1.35;}
   #panel-layers .quick-btn:disabled{opacity:.4; cursor:not-allowed;}
   #panel-layers .lyr-sub{font-size:11px; letter-spacing:.8px; text-transform:uppercase; color:var(--text-muted); margin:2px 0 8px; font-family:var(--mono);}
   @media (pointer:coarse){ .lyr-ic{min-width:38px; min-height:38px; font-size:17px;} .lyr-row{padding:8px 8px;} }
@@ -6854,9 +6855,9 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     '<div id="lyrCtl" class="off">'+
       slider('lyOp','Opacity',0,100,100)+
       '<div class="row"><label>Blend</label><select id="lyBlend">'+opts+'</select></div>'+
-      '<div id="lyrTxt" style="display:none;"><div class="row"><label>Text</label><input type="text" id="lyT" maxlength="200"></div>'+
+      '<div id="lyrTxt" style="display:none;"><div class="row"><label>Text</label><textarea id="lyT" rows="3" maxlength="3000" placeholder="Type here. Enter adds a new line." style="flex:1; min-width:120px; resize:vertical; background:var(--bg-3); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:13px var(--sans);"></textarea></div>'+
         '<div class="row"><label>Font</label><select id="lyF"><option value="Inter, system-ui, sans-serif">Sans</option><option value="Georgia, serif">Serif</option><option value="\'Courier New\', monospace">Mono</option><option value="Impact, Haettenschweiler, sans-serif">Impact</option><option value="\'Brush Script MT\', cursive">Script</option><option value="\'Montserrat\', system-ui, sans-serif">Montserrat</option><option value="\'Playfair Display\', Georgia, serif">Playfair Display</option><option value="\'Oswald\', Impact, sans-serif">Oswald</option><option value="\'Bebas Neue\', Impact, sans-serif">Bebas Neue</option><option value="\'Pacifico\', \'Brush Script MT\', cursive">Pacifico</option><option value="\'Dancing Script\', \'Brush Script MT\', cursive">Dancing Script</option></select><input type="color" id="lyC" value="#ffffff" style="width:42px; height:30px; padding:0; border:none; background:none;"><label style="width:auto;"><input type="checkbox" id="lyBold" style="accent-color:var(--green);"> Bold</label></div>'+
-        slider('lyS','Size',12,400,80)+'</div>'+
+        slider('lyS','Size',12,400,80)+slider('lyW','Box width',0,100,60)+'</div>'+
       slider('lyBr','Brightness',0,200,100)+slider('lyCo','Contrast',0,200,100)+slider('lySa','Saturation',0,200,100)+slider('lyHu','Hue',-180,180,0)+slider('lyBl','Blur',0,30,0,0.5)+
       '<div class="lyr-sub" id="lyBgSub">Remove background · this layer only</div>'+
       '<div id="lyBgBox">'+
@@ -6929,7 +6930,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   function drawLayers(c, k){ L.forEach(function(l){ if(l.vis) drawLayer(c, l, false, k); }); }
   function newLayer(name, type, bmp){
     return {id:uid++, name:name, type:type, bmp:bmp, x:cv.width/2, y:cv.height/2, s:1, rot:0, fh:false, fv:false, op:1, blend:'source-over', vis:true, lock:false,
-            fx:{br:100,co:100,sa:100,hu:0,bl:0}, t:'', ts:clamp(Math.round(cv.width*0.08), 12, 400), tc:'#ffffff', tf:'Inter, system-ui, sans-serif', tb:false};
+            fx:{br:100,co:100,sa:100,hu:0,bl:0}, t:'', ts:clamp(Math.round(cv.width*0.08), 12, 400), tc:'#ffffff', tf:'Inter, system-ui, sans-serif', tb:false, tw:60};
   }
   function clone(l){ return Object.assign({}, l, {fx:Object.assign({}, l.fx)}); }
   function anyVisible(){ return L.some(function(l){ return l.vis; }); }
@@ -7021,7 +7022,26 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     ensureWebFont(l);
     var fs = l.ts, font = (l.tb ? '700 ' : '400 ') + fs + 'px ' + l.tf, lines = (l.t || ' ').split('\n');
     var m = mk(8, 8).getContext('2d'); m.font = font;
+    var padW = Math.round(fs*0.25), maxW = (l.tw > 0) ? Math.max(fs, cv.width*l.tw/100 - padW*2) : 0;
+    if(maxW){
+      var out = [];
+      lines.forEach(function(ln){
+        if(!ln){ out.push(''); return; }
+        var cur = '';
+        ln.split(' ').forEach(function(word){
+          var t = cur ? cur + ' ' + word : word;
+          if(cur && m.measureText(t).width > maxW){ out.push(cur); cur = word; } else cur = t;
+          while(m.measureText(cur).width > maxW && cur.length > 1){
+            var k = cur.length - 1; while(k > 1 && m.measureText(cur.slice(0, k)).width > maxW) k--;
+            out.push(cur.slice(0, k)); cur = cur.slice(k);
+          }
+        });
+        out.push(cur);
+      });
+      lines = out;
+    }
     var w = 0; lines.forEach(function(s){ w = Math.max(w, m.measureText(s).width); });
+    if(maxW) w = Math.max(w, maxW);
     var pad = Math.round(fs*0.25), lh = Math.round(fs*1.2), c = mk(w + pad*2, lh*lines.length + pad*2), g = c.getContext('2d');
     g.font = font; g.fillStyle = l.tc; g.textBaseline = 'top'; g.textAlign = 'left';
     lines.forEach(function(s, i){ g.fillText(s, pad, pad + i*lh + (lh-fs)/2); });
@@ -7107,7 +7127,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     Object.keys(v).forEach(function(id){ $(id).value = v[id]; $(id+'V').textContent = v[id] + (id==='lyOp'||id==='lyBr'||id==='lyCo'||id==='lySa' ? '%' : id==='lyHu' ? '°' : id==='lyBl' ? 'px' : ''); });
     $('lyBlend').value = l ? l.blend : 'source-over';
     var tx = $('lyrTxt'); tx.style.display = (l && l.type==='text') ? '' : 'none';
-    if(l && l.type==='text'){ $('lyT').value = l.t; $('lyF').value = l.tf; $('lyC').value = l.tc; $('lyBold').checked = l.tb; $('lyS').value = l.ts; $('lySV').textContent = l.ts + 'px'; }
+    if(l && l.type==='text'){ $('lyT').value = l.t; $('lyW').value = l.tw == null ? 0 : l.tw; $('lyF').value = l.tf; $('lyC').value = l.tc; $('lyBold').checked = l.tb; $('lyS').value = l.ts; $('lySV').textContent = l.ts + 'px'; }
     $('lyMerge').disabled = !l || idx(l.id) < 1;
     var bgOK = !!l && l.type !== 'text';
     $('lyBgSub').style.display = $('lyBgBox').style.display = bgOK ? '' : 'none';
@@ -7123,13 +7143,13 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     el.addEventListener('change', function(){ var l = cur(); if(!l || l.lock) return; pushHist(); renderList(); });
     el.addEventListener('dblclick', function(){ if(el.type === 'range' && el.dataset.def !== undefined){ el.value = el.dataset.def; el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change')); } });
   }
-  function syncVals(){ var l = cur(); if(!l) return; $('lyOpV').textContent = Math.round(l.op*100)+'%'; $('lyBrV').textContent = l.fx.br+'%'; $('lyCoV').textContent = l.fx.co+'%'; $('lySaV').textContent = l.fx.sa+'%'; $('lyHuV').textContent = l.fx.hu+'°'; $('lyBlV').textContent = l.fx.bl+'px'; if(l.type==='text') $('lySV').textContent = l.ts+'px'; }
+  function syncVals(){ var l = cur(); if(!l) return; $('lyOpV').textContent = Math.round(l.op*100)+'%'; $('lyBrV').textContent = l.fx.br+'%'; $('lyCoV').textContent = l.fx.co+'%'; $('lySaV').textContent = l.fx.sa+'%'; $('lyHuV').textContent = l.fx.hu+'°'; $('lyBlV').textContent = l.fx.bl+'px'; if(l.type==='text'){ $('lySV').textContent = l.ts+'px'; $('lyWV').textContent = l.tw > 0 ? l.tw + '%' : 'Auto'; } }
   [['lyOp',100],['lyBr',100],['lyCo',100],['lySa',100],['lyHu',0],['lyBl',0]].forEach(function(p){ $(p[0]).dataset.def = p[1]; });
   bind('lyOp', function(l, e){ l.op = e.value/100; });
   bind('lyBr', function(l, e){ l.fx.br = +e.value; }); bind('lyCo', function(l, e){ l.fx.co = +e.value; });
   bind('lySa', function(l, e){ l.fx.sa = +e.value; }); bind('lyHu', function(l, e){ l.fx.hu = +e.value; }); bind('lyBl', function(l, e){ l.fx.bl = +e.value; });
   $('lyBlend').addEventListener('change', function(){ var l = cur(); if(!l || l.lock) return; l.blend = this.value; pushHist(); redraw(); });
-  [['lyT', function(l, e){ l.t = e.value; }], ['lyF', function(l, e){ l.tf = e.value; }], ['lyC', function(l, e){ l.tc = e.value; }], ['lyS', function(l, e){ l.ts = +e.value; }]].forEach(function(p){
+  [['lyT', function(l, e){ l.t = e.value; }], ['lyF', function(l, e){ l.tf = e.value; }], ['lyC', function(l, e){ l.tc = e.value; }], ['lyS', function(l, e){ l.ts = +e.value; }], ['lyW', function(l, e){ l.tw = +e.value; }]].forEach(function(p){
     var el = $(p[0]);
     el.addEventListener('input', function(){ var l = cur(); if(!l || l.type!=='text' || l.lock) return; p[1](l, el); renderText(l); syncVals(); redraw(); });
     el.addEventListener('change', function(){ var l = cur(); if(l && l.type==='text'){ pushHist(); renderList(); } });

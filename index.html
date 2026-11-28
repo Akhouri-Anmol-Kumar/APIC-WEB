@@ -5335,7 +5335,7 @@
     return new Blob([out], {type: 'application/pdf'});
   }
   var exPdfExtras = [];     // extra images for a multi-page PDF (File objects)
-  async function encodeFor(st){
+  async function encodeCore(st, canvas){
     var W = Math.max(1, Math.round(st.w || canvas.width)), H = Math.max(1, Math.round(st.h || canvas.height));
     var src = (W !== canvas.width || H !== canvas.height) ? highQualityResize(canvas, W, H) : canvas;
     var out = {w: src.width, h: src.height}, f = st.fmt;
@@ -5371,6 +5371,13 @@
     }
     if(!out.ext) out.ext = extFromBlob(out.blob, f === 'jpeg' ? 'jpg' : f);
     return out;
+  }
+
+  async function encodeFor(st){
+    var lc = window.__apicLayers, fc = null;
+    try{ if(lc && lc.flatCopy && lc.count() > 0) fc = lc.flatCopy(); }catch(e){ fc = null; }
+    try{ return await encodeCore(st, fc || canvas); }
+    finally{ if(fc){ fc.width = 1; fc.height = 1; } }
   }
 
   /* ---- Export dialog ---- */
@@ -7039,7 +7046,11 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   $('lyAddImg').addEventListener('click', function(){ fileIn.value = ''; fileIn.click(); });
   fileIn.addEventListener('change', function(){ Array.prototype.forEach.call(fileIn.files, addFile); });
   $('lyAddTxt').addEventListener('click', function(){
-    var l = newLayer('Text', 'text', mk(2, 2)); l.t = 'Your text'; renderText(l); addLayer(l);
+    var l = newLayer('Text', 'text', mk(2, 2)); l.t = 'Your text';
+    try{ var sm = mk(16, 16), sg = sm.getContext('2d'); sg.drawImage(cv, 0, 0, 16, 16); var d = sg.getImageData(0, 0, 16, 16).data, sum = 0, n = 0;
+      for(var q = 0; q < d.length; q += 4){ if(d[q+3] < 8) continue; sum += 0.2126*d[q] + 0.7152*d[q+1] + 0.0722*d[q+2]; n++; }
+      l.tc = (n && sum/n > 140) ? '#111111' : '#ffffff'; }catch(e){}
+    renderText(l); addLayer(l);
     var t = $('lyT'); t.focus(); t.select();
   });
   $('lyAddCopy').addEventListener('click', function(){
@@ -7520,6 +7531,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
     return new Blob(P.write({width:W, height:H, layers:layers, merged:mg.getImageData(0, 0, W, H).data}), {type:'image/vnd.adobe.photoshop'});
   }
   window.__apicLayers.psdBlob = psdBlob;
+  window.__apicLayers.flatCopy = function(){ var c = mk(cv.width, cv.height), g = c.getContext('2d'); if(baked) g.putImageData(baked, 0, 0); else g.drawImage(cv, 0, 0); if(!busy) drawLayers(g); return c; };
   async function psdAuthed(){
     if(typeof window.__apicBatchAuth !== 'function' || typeof window.__apicBatchSave !== 'function'){ say('✕ Downloads aren’t available right now. Reload the page and try again.'); return false; }
     var st; try{ st = await window.__apicBatchAuth(); }catch(e){ st = 'network'; }

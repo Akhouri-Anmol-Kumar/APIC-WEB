@@ -466,7 +466,8 @@
       },
       show: function(mb, cb){ build(); onCancel = cb; document.getElementById('apicMbTxt').textContent = 'Downloading AI model (' + mb + ')… 0%'; bar.classList.add('show'); },
       update: function(pc){ var t = document.getElementById('apicMbTxt'); if(t) t.textContent = t.textContent.replace(/….*$/, '… ' + pc + '%'); },
-      hide: function(){ if(bar) bar.classList.remove('show'); onCancel = null; }
+      hide: function(){ if(bar) bar.classList.remove('show'); onCancel = null; },
+      cancel: function(){ if(onCancel) onCancel(); }
     };
   })();
 
@@ -1210,7 +1211,7 @@
   .sel-head b{font-family:var(--mono); font-size:10.5px; letter-spacing:1px; text-transform:uppercase; color:var(--text);}
   .sel-status{font-family:var(--mono); font-size:11px; color:var(--text-muted);}
   .sel-status.has{color:var(--green);}
-  .sel-seg{display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-bottom:12px;}
+  .sel-seg{display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-bottom:12px;}
   .sel-seg button{padding:9px 6px; background:transparent; border:0; color:var(--text-muted); font-family:var(--sans); font-size:12px; cursor:pointer; min-height:36px;}
   .sel-seg button + button{border-left:1px solid var(--line);}
   .sel-seg button.on{background:var(--green); color:#04140c; font-weight:600;}
@@ -1468,6 +1469,7 @@
             <div class="sel-seg" id="selPurposeSeg" role="group" aria-label="What to do with the selected area">
               <button type="button" data-purpose="crop" class="on" aria-pressed="true">Crop</button>
               <button type="button" data-purpose="hide" aria-pressed="false">Blur / pixelate</button>
+              <button type="button" data-purpose="erase" aria-pressed="false">Erase area</button>
             </div>
             <div id="selCropOpts">
               <div class="row"><label for="cropRatio">Shape</label>
@@ -1483,13 +1485,20 @@
               <div class="row"><label for="regionAmt">Strength</label>
                 <input type="range" id="regionAmt" min="1" max="100" value="60"><span class="val" id="regionAmtVal">60%</span></div>
             </div>
+            <div id="selEraseOpts" style="display:none;">
+              <div class="row"><label for="eraseShape">Area shape</label>
+                <select id="eraseShape"><option value="rect">Rectangle</option><option value="ellipse">Ellipse</option></select></div>
+              <div class="row"><label for="eraseMode">Erase</label>
+                <select id="eraseMode"><option value="inside">Inside the area</option><option value="outside">Everything outside the area</option></select></div>
+            </div>
             <div class="sel-actions">
               <button class="btn btn-ghost btn-sm" id="selToggle" type="button">Select area</button>
               <button class="btn btn-ghost btn-sm" id="cropClearE" type="button">Clear</button>
               <button class="btn btn-gold btn-sm" id="cropApplyE" type="button">Apply crop</button>
               <button class="btn btn-gold btn-sm" id="regionApply" type="button" style="display:none;">Apply blur</button>
+              <button class="btn btn-gold btn-sm" id="eraseApply" type="button" style="display:none;">Erase area</button>
             </div>
-            <p class="hint" id="selHint">Draw the box right on the photo. Drag its edges or corners to resize, drag inside to move. Blur and pixelate preview live inside the box. <b>Enter</b> applies, <b>Esc</b> clears.</p>
+            <p class="hint" id="selHint">Draw the box right on the photo. Drag its edges or corners to resize, drag inside to move. Blur and pixelate preview live inside the box. <b>Erase area</b> makes the selection transparent (export PNG or WebP to keep it). <b>Enter</b> applies, <b>Esc</b> clears.</p>
           </div>
           <div class="sel-card" id="bdrCard">
             <div class="sel-head"><b>Border</b><span class="sel-status" id="bdrStatus" role="status" aria-live="polite">Frame the whole photo</span></div>
@@ -2517,6 +2526,7 @@
 
   function render(){
     if(!originalImg) return;
+    layersRedraw();
     var w = originalImg.naturalWidth, h = originalImg.naturalHeight;
     var rotated = (rotation % 180 !== 0);
     var nw = rotated ? h : w, nh = rotated ? w : h;
@@ -2555,6 +2565,8 @@
     document.getElementById('editBlurVal').textContent = '0px';
     resetAdvancedUI();
   }
+  // The Layers preview (#layerStage) is a copy of the photo + layers, so it must be repainted whenever the photo's pixels change.
+  function layersRedraw(){ try{ if(window.__apicLayers && window.__apicLayers.redraw) window.__apicLayers.redraw(); }catch(e){} }
   function bakeToOriginal(done){
     canvasToUrl(canvas, function(url){
       var snap = new Image();
@@ -2562,7 +2574,9 @@
         originalImg = snap;
         resetAdjustmentState();
         commitHistory();
+        layersRedraw();
         if(typeof done === 'function') done();
+        layersRedraw();
       };
       snap.src = url;
     });
@@ -2686,11 +2700,11 @@
   var view = {z:1, x:0, y:0}, handMode = false, spaceDown = false, gest = null, panDrag = null;
   function viewApply(){
     var t = (view.z === 1 && !view.x && !view.y) ? '' : 'translate(' + view.x + 'px,' + view.y + 'px) scale(' + view.z + ')';
-    [canvas, overlay].forEach(function(el){ el.style.transformOrigin = t ? '0 0' : ''; el.style.transform = t; });
+    [canvas, overlay, document.getElementById('layerStage')].forEach(function(el){ if(!el) return; el.style.transformOrigin = t ? '0 0' : ''; el.style.transform = t; });
     updateZoomBar();
   }
   function viewClamp(){
-    var W = overlay.clientWidth, H = overlay.clientHeight;
+    var W = canvas.clientWidth || overlay.clientWidth, H = canvas.clientHeight || overlay.clientHeight;
     view.x = Math.min(W - 40, Math.max(40 - W*view.z, view.x));
     view.y = Math.min(H - 40, Math.max(40 - H*view.z, view.y));
   }
@@ -2698,20 +2712,22 @@
   function viewZoomAt(nz, cx, cy){
     nz = Math.min(10, Math.max(1, nz));
     if(nz === 1){ viewReset(); return; }
-    var r = overlay.getBoundingClientRect();
+    var r = viewRef().getBoundingClientRect();
     var ox = r.left - view.x, oy = r.top - view.y;
     var lx = (cx - r.left)/view.z, ly = (cy - r.top)/view.z;
     view.z = nz; view.x = cx - ox - lx*nz; view.y = cy - oy - ly*nz;
     viewClamp(); viewApply();
   }
-  function zoomable(){ return overlay.classList.contains('active'); }
+  function overlayOn(){ return overlay.classList.contains('active'); }
+  function viewRef(){ return overlayOn() ? overlay : canvas; }   // the overlay is display:none in tabs that don't draw on the photo
+  function zoomable(){ return overlayOn() || !!originalImg; }   // zoom bar is available in every tab once a photo is open
   var zoomBar = document.createElement('div'); zoomBar.id = 'zoomBar';
   zoomBar.innerHTML = '<button type="button" data-z="out" title="Zoom out">−</button><span id="zoomPct">100%</span><button type="button" data-z="in" title="Zoom in">+</button><button type="button" data-z="fit" title="Fit to view">Fit</button><button type="button" data-z="hand" title="Move the photo (hold Space, or two fingers)">✋</button>';
   dropEl.appendChild(zoomBar);
   ['click','mousedown','touchstart'].forEach(function(ev){ zoomBar.addEventListener(ev, function(e){ e.stopPropagation(); if(ev === 'click') e.preventDefault(); }, {passive:false}); });
   zoomBar.addEventListener('click', function(e){
     var b = e.target.closest('button'); if(!b) return;
-    var r = overlay.getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2, d = b.dataset.z;
+    var r = viewRef().getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2, d = b.dataset.z;
     if(d === 'in') viewZoomAt(view.z*1.5, cx, cy);
     else if(d === 'out') viewZoomAt(view.z/1.5, cx, cy);
     else if(d === 'fit') viewReset();
@@ -2724,19 +2740,35 @@
     overlay.style.cursor = handMode ? 'grab' : (activeTool === 'advanced' ? (view.z > 1 ? 'grab' : 'default') : '');
   }
   overlay.addEventListener('wheel', function(e){
-    if(!zoomable() || !(e.ctrlKey || e.metaKey)) return;
+    if(!overlayOn() || !(e.ctrlKey || e.metaKey)) return;
     e.preventDefault(); viewZoomAt(view.z*Math.exp(-e.deltaY*0.01), e.clientX, e.clientY);
   }, {passive:false});
   window.addEventListener('keydown', function(e){
-    if(e.code !== 'Space' || !zoomable()) return;
+    if(e.code !== 'Space' || !overlayOn()) return;
     var tg = (e.target && e.target.tagName) || ''; if(/INPUT|TEXTAREA|SELECT|BUTTON/.test(tg)) return;
     spaceDown = true; e.preventDefault();
   });
   window.addEventListener('keyup', function(e){ if(e.code === 'Space') spaceDown = false; });
+  dropEl.addEventListener('wheel', function(e){
+    if(overlayOn() || !zoomable() || !(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault(); viewZoomAt(view.z*Math.exp(-e.deltaY*0.01), e.clientX, e.clientY);
+  }, {passive:false});
+  var altPan = null;
+  dropEl.addEventListener('pointerdown', function(e){
+    if(overlayOn() || !zoomable() || !(handMode || spaceDown || e.button === 1)) return;
+    if(e.target && e.target.closest && e.target.closest('#zoomBar')) return;
+    e.preventDefault(); e.stopPropagation(); altPan = {x: e.clientX, y: e.clientY};
+    try{ dropEl.setPointerCapture(e.pointerId); }catch(x){}
+  }, true);
+  dropEl.addEventListener('pointermove', function(e){
+    if(!altPan) return;
+    e.preventDefault(); view.x += e.clientX - altPan.x; view.y += e.clientY - altPan.y; altPan.x = e.clientX; altPan.y = e.clientY; viewClamp(); viewApply();
+  });
+  ['pointerup','pointercancel'].forEach(function(t){ dropEl.addEventListener(t, function(){ altPan = null; }); });
   window.addEventListener('keydown', function(e){
-    if(!zoomable() || e.ctrlKey || e.metaKey || e.altKey) return;
+    if(!overlayOn() || e.ctrlKey || e.metaKey || e.altKey) return;
     var tg = (e.target && e.target.tagName) || ''; if(/INPUT|TEXTAREA|SELECT/.test(tg) || (e.target && e.target.isContentEditable)) return;
-    var r = overlay.getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2;
+    var r = viewRef().getBoundingClientRect(), cx = r.left + r.width/2, cy = r.top + r.height/2;
     if(e.key === '+' || e.key === '='){ e.preventDefault(); viewZoomAt(view.z*1.5, cx, cy); }
     else if(e.key === '-' || e.key === '_'){ e.preventDefault(); viewZoomAt(view.z/1.5, cx, cy); }
     else if(e.key === '0'){ e.preventDefault(); viewReset(); }
@@ -2778,7 +2810,7 @@
     alignRaf = requestAnimationFrame(alignLoop);
   }
   function syncOverlay(){
-    if(!originalImg){ overlay.style.display = 'none'; return; }
+    if(!originalImg){ overlay.style.display = 'none'; if(typeof zoomBar !== 'undefined' && zoomBar) zoomBar.classList.remove('show'); return; }
     overlay.width = canvas.width; overlay.height = canvas.height;
     maskCanvas.width = canvas.width; maskCanvas.height = canvas.height;
     maskBox = null; fxStamp++;
@@ -2791,7 +2823,7 @@
     overlay.classList.toggle('active', showOverlay);
     if(showOverlay && !alignRaf) alignRaf = requestAnimationFrame(alignLoop);
     if(overlay.width + 'x' + overlay.height !== viewSize){ viewSize = overlay.width + 'x' + overlay.height; viewReset(); }
-    updateBgTouch(); updateZoomBar();
+    updateBgTouch(); updateZoomBar(); layersRedraw();
     redrawOverlay();
   }
   window.addEventListener('resize', alignOverlay);
@@ -2998,6 +3030,7 @@
       ctx.restore();
     }
     bgLast = {x: p.x, y: p.y};
+    layersRedraw();
     var oc = overlay.getContext('2d'); oc.clearRect(0, 0, overlay.width, overlay.height);
     oc.save(); oc.strokeStyle = restore ? '#39ff9d' : '#ff3b6b'; oc.lineWidth = Math.max(1, 2*overlay.width/Math.max(1, overlay.clientWidth*view.z)); oc.beginPath(); oc.arc(p.x, p.y, r, 0, Math.PI*2); oc.stroke(); oc.restore();
   }
@@ -3031,9 +3064,28 @@
   }
   // Path of the hidden area (rectangle or ellipse) on any context that is in photo-pixel space.
   function selPath(g, x, y, w, h){
-    g.beginPath();
-    if(selEl('regionShape').value === 'ellipse') g.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, Math.PI*2);
+    g.beginPath(); selSub(g, x, y, w, h);
+  }
+  // Adds the selection shape as a sub-path (no beginPath) so it can be combined, e.g. "everything outside".
+  function selSub(g, x, y, w, h){
+    var shp = selPurpose === 'erase' ? selEl('eraseShape').value : selEl('regionShape').value;
+    if(shp === 'ellipse'){ g.moveTo(x + w, y + h/2); g.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, Math.PI*2); g.closePath(); }
     else g.rect(x, y, w, h);
+  }
+  // Live preview of Erase area: the part that will become transparent is tinted.
+  function paintErasePreview(g, k, W, H){
+    var bx = selBox();
+    if(bx){
+      var outside = selEl('eraseMode').value === 'outside';
+      g.save(); g.beginPath();
+      if(outside) g.rect(0, 0, W, H);
+      selSub(g, bx.x, bx.y, bx.w, bx.h);
+      g.fillStyle = 'rgba(255,59,107,0.38)'; g.fill(outside ? 'evenodd' : 'nonzero'); g.restore();
+      g.save(); selPath(g, bx.x, bx.y, bx.w, bx.h);
+      g.lineWidth = Math.max(1, 2*k); g.strokeStyle = 'rgba(0,0,0,.55)'; g.stroke();
+      g.setLineDash([6*k, 4*k]); g.lineWidth = Math.max(1, 1.5*k); g.strokeStyle = '#ffffff'; g.stroke(); g.restore();
+    }
+    drawCropBox(g, k, W, H, { dim: false, grid: false });
   }
   // Builds the blurred / pixelated version of one region (s < 1 makes a cheaper copy for live preview).
   // Blur uses edge-replicated padding, so a box touching the photo's border no longer fades to transparent there.
@@ -3083,6 +3135,7 @@
   // Paints the selection (crop dimming, or a live blur / pixelate preview) on ANY context in photo-pixel space.
   function paintSelection(g, k, W, H){
     var r = cropRect; if(!r || r.w < 1 || r.h < 1) return;
+    if(selPurpose === 'erase'){ paintErasePreview(g, k, W, H); return; }
     if(selPurpose === 'hide'){
       var f = previewFx();
       if(f){
@@ -3102,14 +3155,14 @@
     ok: function(){ return activeTool === 'edit' && !!originalImg; },
     has: function(){ return !!(cropRect && cropRect.w >= 4 && cropRect.h >= 4); },
     paint: function(g, k, W, H){ if(activeTool === 'edit' && cropRect) paintSelection(g, k, W, H); },
-    label: function(){ return selPurpose === 'hide' ? 'Apply ' + (selEl('regionMode').value === 'pixelate' ? 'pixelate' : 'blur') : 'Apply crop'; },
+    label: function(){ return selPurpose === 'erase' ? 'Erase area' : selPurpose === 'hide' ? 'Apply ' + (selEl('regionMode').value === 'pixelate' ? 'pixelate' : 'blur') : 'Apply crop'; },
     down: function(p, k, coarse){ kOverride = k; try{ if(!editSelecting) window.__apicSetSel(true); cropBegin(p, coarse); redrawOverlay(); } finally { kOverride = 0; } },
     move: function(p, k){ if(!cropDrag) return; kOverride = k; try{ cropUpdate(p); redrawOverlay(); } finally { kOverride = 0; } },
     up: function(k){ kOverride = k || 0; try{ pointerUp(); } finally { kOverride = 0; } },
     hover: function(p, k){ kOverride = k; try{ var h = cropHit(p, false); return !h ? 'crosshair' : (h.mode === 'move' ? 'move' : CROP_CURSOR[h.h]); } finally { kOverride = 0; } },
-    apply: function(){ selEl(selPurpose === 'hide' ? 'regionApply' : 'cropApplyE').click(); },
+    apply: function(){ selEl(selPurpose === 'erase' ? 'eraseApply' : selPurpose === 'hide' ? 'regionApply' : 'cropApplyE').click(); },
     clear: function(){ selEl('cropClearE').click(); },
-    invalidate: function(){ fxStamp++; if(activeTool === 'edit' && cropRect && selPurpose === 'hide') redrawOverlay(); }
+    invalidate: function(){ fxStamp++; if(activeTool === 'edit' && cropRect && (selPurpose === 'hide' || selPurpose === 'erase')) redrawOverlay(); }
   };
   (function(){
     var tog = selEl('selToggle'), ratio = selEl('cropRatio'), stat = selEl('selStatus'), amt = selEl('regionAmt'), amtVal = selEl('regionAmtVal');
@@ -3134,12 +3187,15 @@
         setText(stat, txt); stat.classList.toggle('has', has);
       }
       Array.prototype.forEach.call(segBtns, function(b){ var on = (b.dataset.purpose === selPurpose); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
-      selEl('selCropOpts').style.display = hide ? 'none' : '';
+      var era = selPurpose === 'erase';
+      selEl('selCropOpts').style.display = (hide || era) ? 'none' : '';
       selEl('selHideOpts').style.display = hide ? '' : 'none';
-      selEl('cropApplyE').style.display = hide ? 'none' : '';
+      selEl('selEraseOpts').style.display = era ? '' : 'none';
+      selEl('cropApplyE').style.display = (hide || era) ? 'none' : '';
       var ra = selEl('regionApply'); ra.style.display = hide ? '' : 'none';
-      setText(ra, window.__apicSel.label());
-      selEl('cropApplyE').disabled = !has; ra.disabled = !has;
+      if(hide) setText(ra, window.__apicSel.label());
+      var ea = selEl('eraseApply'); ea.style.display = era ? '' : 'none';
+      selEl('cropApplyE').disabled = !has; ra.disabled = !has; ea.disabled = !has;
       selEl('cropClearE').disabled = !has;
       setText(tog, (editSelecting && has) ? 'Reset box' : 'Select area');
       setText(amtVal, amt.value + '%');
@@ -3157,9 +3213,9 @@
     }
     Array.prototype.forEach.call(segBtns, function(b){ b.addEventListener('click', function(){ setPurpose(b.dataset.purpose); if(originalImg && activeTool === 'edit' && !cropRect){ setSel(true); defaultBox(); redrawOverlay(); } b.blur(); }); });
     // Touching any Blur/Pixelate control with no area yet drops a ready-to-edit box, so the effect is visible straight away.
-    function ensureBox(){ if(!originalImg || activeTool !== 'edit' || selPurpose !== 'hide') return; if(!cropRect){ setSel(true); defaultBox(); } }
+    function ensureBox(){ if(!originalImg || activeTool !== 'edit' || (selPurpose !== 'hide' && selPurpose !== 'erase')) return; if(!cropRect){ setSel(true); defaultBox(); } }
     ['input', 'change'].forEach(function(ev){
-      ['regionAmt', 'regionMode', 'regionShape'].forEach(function(id){ selEl(id).addEventListener(ev, function(){ ensureBox(); redrawOverlay(); updateSelUI(); }); });
+      ['regionAmt', 'regionMode', 'regionShape', 'eraseShape', 'eraseMode'].forEach(function(id){ selEl(id).addEventListener(ev, function(){ ensureBox(); redrawOverlay(); updateSelUI(); }); });
     });
     document.addEventListener('apic:loaded', function(){ ratio.value = '-1'; showCustom(); fxStamp++; updateSelUI(); });   // a new photo starts with no shape chosen (browsers can keep the old <select> value)
     tog.addEventListener('click', function(){ setSel(true); defaultBox(); redrawOverlay(); updateSelUI(); tog.blur(); });
@@ -3192,6 +3248,20 @@
       ctx.save(); selPath(ctx, bx.x, bx.y, bx.w, bx.h); ctx.clip(); ctx.drawImage(fx, bx.x, bx.y); ctx.restore();
       cropRect = null; fxStamp++; redrawOverlay();
       flash('✓ ' + (p.mode === 'pixelate' ? 'Pixelated' : 'Blurred') + ' · Ctrl+Z to undo');
+      bakeToOriginal(function(){ render(); syncOverlay(); });
+    });
+    selEl('eraseApply').addEventListener('click', function(){
+      if(!originalImg){ return; }
+      var bx = selBox();
+      if(!cropRect || cropRect.w < 4 || cropRect.h < 4 || !bx){ setSel(true); defaultBox(); redrawOverlay(); return; }
+      var W = canvas.width, H = canvas.height, outside = selEl('eraseMode').value === 'outside';
+      ctx.save(); ctx.globalCompositeOperation = 'destination-out'; ctx.fillStyle = '#000'; ctx.beginPath();
+      if(outside) ctx.rect(0, 0, W, H);
+      selSub(ctx, bx.x, bx.y, bx.w, bx.h);
+      ctx.fill(outside ? 'evenodd' : 'nonzero'); ctx.restore();
+      cropRect = null; fxStamp++; redrawOverlay();
+      hasAlpha = true; dropEl.classList.add('has-alpha');
+      flash('\u2713 Erased \u00b7 export PNG or WebP to keep transparency \u00b7 Ctrl+Z to undo');
       bakeToOriginal(function(){ render(); syncOverlay(); });
     });
     updateSelUI();
@@ -3337,7 +3407,7 @@
   window.addEventListener('keydown', function(e){
     if(activeTool !== 'edit' || !editSelecting || !cropRect || e.isComposing) return;
     var tg = (e.target && e.target.tagName) || ''; if(/INPUT|TEXTAREA|SELECT|BUTTON/.test(tg) || (e.target && e.target.isContentEditable)) return;
-    if(e.key === 'Enter'){ e.preventDefault(); document.getElementById(selPurpose === 'hide' ? 'regionApply' : 'cropApplyE').click(); }
+    if(e.key === 'Enter'){ e.preventDefault(); document.getElementById(selPurpose === 'erase' ? 'eraseApply' : selPurpose === 'hide' ? 'regionApply' : 'cropApplyE').click(); }
     else if(e.key === 'Escape'){ e.preventDefault(); cropRect = null; redrawOverlay(); }
   });
 
@@ -6033,12 +6103,31 @@
     return { data: fg, w: w, h: h };
   }
 
-  var bgBusy = false;
+  var bgBusy = false, bgRunId = 0, bgBtnLabel = 'Remove background';
+  // Cancel a running Remove Background (download, model load or inference). A model load / inference is one blocking
+  // call inside its worker, so the only way to stop it right now is to end the worker; fresh ones start on the next run
+  // and re-read the model from the browser cache (no second download).
+  function bgCancelRun(){
+    bgRunId++;
+    try{ if(window.__apicModelUI && window.__apicModelUI.cancel) window.__apicModelUI.cancel(); }catch(e){}
+    var ce = new Error('Cancelled'); ce.apicCancelled = true;
+    try{ if(bgWorker) bgWorker.terminate(); }catch(x){} bgWorker = null;
+    try{ if(bgGpuWorker) bgGpuWorker.terminate(); }catch(x){} bgGpuWorker = null;
+    for(var k in bgWorkerCbs){ try{ bgWorkerCbs[k].reject(ce); }catch(x){} } bgWorkerCbs = {};
+    bgLoadedTiers = {}; bgLoadedEp = {};
+    var b = document.getElementById('runBgRemove'), st = document.getElementById('bgStatus');
+    if(b){ b.textContent = bgBtnLabel; b.disabled = false; b.removeAttribute('aria-label'); }
+    if(st) st.textContent = 'Cancelled \u2014 your image was not changed. Pick another model and run again.';
+    bgBusy = false;
+  }
   document.getElementById('runBgRemove').addEventListener('click', async function(){
-    if(!originalImg || bgBusy) return;
+    if(bgBusy){ bgCancelRun(); return; }
+    if(!originalImg) return;
     bgBusy = true;
+    var myRun = ++bgRunId;
+    function chk(){ if(myRun !== bgRunId){ var ce = new Error('Cancelled'); ce.apicCancelled = true; throw ce; } }
     var statusEl = document.getElementById('bgStatus');
-    var btn = this; btn.disabled = true;
+    var btn = this; bgBtnLabel = btn.textContent; btn.textContent = '\u2715 Cancel'; btn.setAttribute('aria-label', 'Cancel background removal');
     var qSel = document.getElementById('bgQuality');
     var quality = qSel ? qSel.value : 'fast';
     function say(t){ statusEl.innerHTML = '<span class="spinner"></span> ' + t; }
@@ -6058,6 +6147,7 @@
           if(tier === 'bire'){ var bp = await window.__bgPickBire(); mb = bp.mb; }
           say('loading AI model (' + mb + ' MB, first time only)…');
           var session = await bgLoadSession(tier, function(pct){ say('downloading AI model ' + pct + '% (' + mb + ' MB, cached afterwards)'); });
+          chk();
           // BiRefNet: the extra mirrored + zoom passes are only run when the GPU engine is active (about 1 s each).
           // On CPU a single pass is already slow, so it runs the one full-frame pass only — no quality is faked.
           var onGpu = (tier === 'bire' && bgLoadedEp.bire === 'webgpu');
@@ -6067,9 +6157,11 @@
           say(hq ? 'analysing image (pass 1 of ' + (2) + ')…' : 'analysing image…');
           await bgYield();
           var m = await bgInfer(tier, session, cfg, bgPrepInput(flat, cfg, false));
+          chk();
           if(hq){
             say('analysing image (mirrored check)…'); await bgYield();
             var mf = await bgInfer(tier, session, cfg, bgPrepInput(flat, cfg, true));
+            chk();
             bgUnflip(mf.data, mf.w, mf.h); bgAvg(m.data, mf.data);
           }
           matte = m; usedTier = tier;
@@ -6100,6 +6192,7 @@
           delete window.__bgSessions[tier]; delete bgLoadedTiers[tier]; matte = null; zoom = null;
         }
       }
+      chk();
       if(!matte){
         say('AI model unavailable — using fallback (people only)…');
         await bgYield();
@@ -6130,6 +6223,7 @@
                                [workCopy.buffer, orig.data.buffer], say);
           resultPixels = r.pixels;
         } catch(wErr){
+          if(wErr && wErr.apicCancelled) throw wErr;
           console.warn('Worker refine failed, falling back to main thread:', wErr);
           bgWorkerBroken = true; resultPixels = null;
           orig = ctx.getImageData(0, 0, W, H);   // buffer may have been transferred away
@@ -6146,6 +6240,7 @@
         resultPixels = bgFinish(orig.data, W, H, alphaW, rgb, w, h);
       }
 
+      chk();
       say('finishing…');
       await bgYield();
       ctx.putImageData(new ImageData(resultPixels, W, H), 0, 0);
@@ -6155,6 +6250,7 @@
       bakeToOriginal(function(){ syncOverlay(); }); // so later filter/edit tweaks build on this result, not the pristine source
       statusEl.textContent = '✓ done — export as PNG or WebP to keep transparency';
     } catch(err){
+      if(err && err.apicCancelled && myRun !== bgRunId) return;   // stopped with the Cancel button: already reset
       console.error('Remove BG failed:', err);
       var friendly = window.__apicModelErrMsg && window.__apicModelErrMsg(err);
       if(friendly){
@@ -6167,7 +6263,7 @@
         statusEl.textContent = 'Failed: ' + (err && err.message ? err.message : 'unknown error') + ' — open the browser console for details, or try again.';
       }
     }
-    btn.disabled = false; bgBusy = false;
+    if(myRun === bgRunId){ btn.textContent = bgBtnLabel; btn.removeAttribute('aria-label'); btn.disabled = false; bgBusy = false; }
   });
 
   /* ======================= APIC BATCH + AI TOOLS (additive; all on-device) ======================= */
@@ -6819,6 +6915,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
       H = [{l:L.map(clone), sel:sel}]; hi = 0; refresh();
     },
     btns: function(){ btns(); },
+    redraw: function(){ redraw(); },
     isOpen: function(){ return open; },
     openTab: function(){ if(!open && !tab.disabled) tab.click(); },
     addFile: function(f){ addFile(f); },
@@ -6834,7 +6931,7 @@ COSTS AT SMALL SCALE: $0 across all of the above.
   function btns(){ $('lyUndo').disabled = !(window.__apicCanUndo && window.__apicCanUndo()); $('lyRedo').disabled = !(window.__apicCanRedo && window.__apicCanRedo()); $('lyFlat').disabled = busy || !anyVisible(); }
 
   /* ---------- compose / paint ---------- */
-  function place(){ var s = stage.style; s.left = cv.offsetLeft+'px'; s.top = cv.offsetTop+'px'; s.width = cv.clientWidth+'px'; s.height = cv.clientHeight+'px'; }
+  function place(){ var s = stage.style; s.left = cv.offsetLeft+'px'; s.top = cv.offsetTop+'px'; s.width = cv.clientWidth+'px'; s.height = cv.clientHeight+'px'; s.transformOrigin = cv.style.transformOrigin; s.transform = cv.style.transform; }
   function corners(l){
     var w = l.bmp.width*l.s/2, h = l.bmp.height*l.s/2, c = Math.cos(l.rot), s = Math.sin(l.rot);
     return [[-w,-h],[w,-h],[w,h],[-w,h]].map(function(p){ return {x:l.x+p[0]*c-p[1]*s, y:l.y+p[0]*s+p[1]*c}; });

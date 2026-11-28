@@ -5786,7 +5786,7 @@
   var bgWorkerGlue = '\n' +
     'var ortReady = null, sessions = {}, ORT_GPU = (self.name === "apic-gpu");\n' +
     'function loadOrt(){ if(!ortReady){ importScripts("https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.23.2/" + (ORT_GPU ? "ort.webgpu.min.js" : "ort.min.js"));\n' +
-    '  ort.env.wasm.wasmPaths = "https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.23.2/"; ort.env.wasm.numThreads = 1; ort.env.wasm.proxy = false; ortReady = true; } }\n' +
+    '  ort.env.wasm.wasmPaths = "https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.23.2/"; ort.env.wasm.numThreads = (self.crossOriginIsolated && self.navigator && self.navigator.hardwareConcurrency ? Math.max(1, Math.min(4, self.navigator.hardwareConcurrency - 1)) : 1); ort.env.wasm.proxy = false; ortReady = true; } }\n' +
     'function normalise(o){\n' +
     '  var m = Float32Array.from(o.data), i, mn = Infinity, mx = -Infinity;\n' +
     '  for(i=0;i<m.length;i++){ var v=m[i]; if(v<mn) mn=v; if(v>mx) mx=v; }\n' +
@@ -6341,7 +6341,7 @@
     var upW = null, upCb = {}, upSeq = 0, upKey = null, upEp = 'wasm';
     var UP_SRC = [
       'var ses=null,ep="wasm",B="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.23.2/";',
-      'function cfg(){ort.env.wasm.wasmPaths=B;ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;}',
+      'function cfg(){ort.env.wasm.wasmPaths=B;ort.env.wasm.numThreads=(self.crossOriginIsolated && self.navigator && self.navigator.hardwareConcurrency ? Math.max(1, Math.min(4, self.navigator.hardwareConcurrency - 1)) : 1);ort.env.wasm.proxy=false;}',
       'self.onmessage=async function(e){var d=e.data;try{',
       ' if(d.type==="load"){var gpu=false;try{gpu=!!(self.navigator.gpu&&await self.navigator.gpu.requestAdapter());}catch(x){}',
       '  ep="wasm";if(gpu){try{importScripts(B+"ort.webgpu.min.js");ep="webgpu";}catch(x){}}',

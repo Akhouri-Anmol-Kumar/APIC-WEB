@@ -1,0 +1,7 @@
+Dancing Script
+
+Copyright 2016 The Dancing Script Project Authors (https://github.com/googlefonts/DancingScript), with Reserved Font Name "Dancing Script".
+
+This font is distributed under the SIL Open Font License, Version 1.1 (see OFL-1.1.txt).
+Source: https://github.com/googlefonts/DancingScript
+Subset to Latin + Latin Extended and converted to WOFF for use in APIC; no other changes.

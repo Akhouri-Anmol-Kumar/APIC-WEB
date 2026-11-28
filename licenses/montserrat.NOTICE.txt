@@ -1,0 +1,7 @@
+Montserrat
+
+Copyright 2011 The Montserrat Project Authors (https://github.com/JulietaUla/Montserrat)
+
+This font is distributed under the SIL Open Font License, Version 1.1 (see OFL-1.1.txt).
+Source: https://github.com/JulietaUla/Montserrat
+Subset to Latin + Latin Extended and converted to WOFF for use in APIC; no other changes.
